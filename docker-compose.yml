@@ -165,6 +165,25 @@ services:
     healthcheck: *worker-healthcheck
     restart: unless-stopped
 
+  worker-valuate:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-valuate }
+    environment:
+      <<: *worker-env
+      EBAY_CLIENT_ID: ${EBAY_CLIENT_ID:-}
+      EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
+      KEEPA_API_KEY: ${KEEPA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      PUSHOVER_TOKEN: ${PUSHOVER_TOKEN:-}
+      PUSHOVER_USER: ${PUSHOVER_USER:-}
+    depends_on: *worker-depends
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+
   # ---------------------------------------------------------------------------
   # Phase 3+ services — uncomment as they land.
   # ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import {
   VALUATE_QUEUE,
   WorkerApp,
 } from "@flipsight/worker-core";
-import { amazonUrl, keepaImageUrls, KeepaClient, type KeepaProduct } from "./keepa-client.js";
+import { amazonUrl, keepaImageUrls, KeepaClient, type KeepaProduct } from "@flipsight/clients";
 
 const QUEUE = "keepa";
 

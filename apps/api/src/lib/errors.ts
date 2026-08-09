@@ -17,4 +17,5 @@ export const errors = {
   forbidden: (message = "You do not have access to this resource") => new AppError(403, "FORBIDDEN", message),
   notFound: (message = "Resource not found") => new AppError(404, "NOT_FOUND", message),
   conflict: (message: string) => new AppError(409, "CONFLICT", message),
+  serviceUnavailable: (message: string) => new AppError(503, "SERVICE_UNAVAILABLE", message),
 };

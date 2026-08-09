@@ -10,8 +10,8 @@ import {
   buildSearchQueries,
   type EbaySourceConfig,
 } from "@flipsight/shared";
+import { summaryLocation, summaryPrice, type EbayClient, type EbayItemSummary } from "@flipsight/clients";
 import { enqueueValuate, upsertItem, VALUATE_QUEUE, type WorkerApp } from "@flipsight/worker-core";
-import { summaryLocation, summaryPrice, type EbayClient, type EbayItemSummary } from "./ebay-client.js";
 
 interface SweepTotals {
   found: number;

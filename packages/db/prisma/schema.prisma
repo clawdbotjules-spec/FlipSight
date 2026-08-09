@@ -105,6 +105,14 @@ model PriceSnapshot {
   @@index([itemId, capturedAt])
 }
 
+/// App-level settings edited via PUT /settings/:key (fee schedule, shipping
+/// lookup table, valuation engine config) — zod-validated on both sides.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
 /// Small persisted key/value state per source so workers resume after restarts
 /// (search rotations, last-seen timestamps, response cache validators).
 model WorkerCheckpoint {
@@ -206,6 +214,8 @@ model Deal {
   /// Composite attractiveness score, 0–100.
   score       Int
   status      DealStatus @default(new)
+  /// Engine extras: risk flags, fee/shipping breakdown, identity method…
+  meta        Json       @default("{}")
   /// Who claimed the deal; null while unclaimed.
   userId      String?
   user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)

@@ -40,6 +40,8 @@ export const DealAlertPayloadSchema = z.object({
       sellThroughRate: z.number().nullable(),
       compSource: z.string(),
     }),
+    /** Engine extras: risk flags, fee/shipping breakdown, identity method… */
+    meta: z.record(z.string(), z.unknown()).optional(),
   }),
 });
 

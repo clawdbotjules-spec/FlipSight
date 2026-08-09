@@ -38,6 +38,8 @@ export interface DealPayloadInput {
     sellThroughRate: number | null;
     compSource: string;
   };
+  /** Optional engine extras (risk flags, fee/shipping breakdown, identity). */
+  meta?: Record<string, unknown>;
 }
 
 export function buildDealAlertPayload(input: DealPayloadInput): DealAlertPayload {
@@ -55,6 +57,7 @@ export function buildDealAlertPayload(input: DealPayloadInput): DealAlertPayload
       createdAt: input.deal.createdAt.toISOString(),
       item: { ...input.item },
       valuation: { ...input.valuation },
+      ...(input.meta ? { meta: input.meta } : {}),
     },
   };
 }

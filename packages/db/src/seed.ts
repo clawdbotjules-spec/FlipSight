@@ -170,6 +170,40 @@ async function main() {
       console.log(`Demo user ${DEMO_EMAIL} already exists.`);
     }
 
+    // App settings: create defaults only when absent (UI edits are preserved;
+    // unlike Source.config these are NOT reset on re-seed).
+    const defaultSettings: Record<string, Prisma.InputJsonObject> = {
+      fees: {
+        default: { pct: 13.6, fixed: 0.3 },
+        perCategory: {
+          "Musical Instruments": { pct: 6.35, fixed: 0.3 },
+          "Video Game Consoles": { pct: 13.6, fixed: 0.3 },
+          "Athletic Shoes": { pct: 8.0, fixed: 0.3 },
+        },
+      },
+      shipping: {
+        defaultCost: 12.99,
+        weightTiers: [
+          { maxOz: 8, cost: 4.99 },
+          { maxOz: 16, cost: 6.99 },
+          { maxOz: 80, cost: 12.99 },
+          { maxOz: 320, cost: 19.99 },
+        ],
+        categoryRules: [
+          { match: "Instruments", cost: 24.99 },
+          { match: "Tools", cost: 16.99 },
+          { match: "Electronics", cost: 14.99 },
+          { match: "Cameras", cost: 12.99 },
+        ],
+      },
+      valuation: {},
+    };
+    for (const [key, value] of Object.entries(defaultSettings)) {
+      const existing = await prisma.appSetting.findUnique({ where: { key } });
+      if (!existing) await prisma.appSetting.create({ data: { key, value } });
+    }
+    console.log("Ensured app settings (fees, shipping, valuation).");
+
     const ruleCount = await prisma.alertRule.count({ where: { userId: user.id } });
     if (ruleCount === 0) {
       await prisma.alertRule.create({
@@ -177,7 +211,7 @@ async function main() {
           userId: user.id,
           name: "Default: $20+ profit",
           minProfit: 20,
-          channels: ["websocket"],
+          channels: ["websocket", "discord", "pushover"],
         },
       });
       console.log("Created default alert rule ($20+ net profit, websocket).");

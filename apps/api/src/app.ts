@@ -1,6 +1,8 @@
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
+import { EbayClient } from "@flipsight/clients";
+import { TokenBucket } from "@flipsight/shared";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
   serializerCompiler,
@@ -12,12 +14,14 @@ import authPlugin from "./plugins/auth.js";
 import prismaPlugin from "./plugins/prisma.js";
 import redisPlugin from "./plugins/redis.js";
 import { DealFanout } from "./realtime/fanout.js";
+import makeAssistantRoutes from "./routes/assistant.js";
 import authRoutes from "./routes/auth.js";
 import dealRoutes from "./routes/deals.js";
 import healthRoutes from "./routes/health.js";
 import ledgerRoutes from "./routes/ledger.js";
 import ruleRoutes from "./routes/rules.js";
 import searchRoutes from "./routes/searches.js";
+import settingsRoutes from "./routes/settings.js";
 import wsRoutes from "./routes/ws.js";
 import type { AppConfig } from "./config.js";
 
@@ -126,6 +130,16 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   await app.register(dealRoutes, { prefix: "/deals" });
   await app.register(ledgerRoutes, { prefix: "/ledger" });
   await app.register(searchRoutes, { prefix: "/searches" });
+  await app.register(settingsRoutes, { prefix: "/settings" });
+
+  const ebay = new EbayClient({
+    clientId: process.env.EBAY_CLIENT_ID,
+    clientSecret: process.env.EBAY_CLIENT_SECRET,
+    marketplaceId: process.env.EBAY_MARKETPLACE_ID ?? "EBAY_US",
+    bucket: new TokenBucket({ name: "api-ebay-comps", ratePerSec: 1, burst: 2, log: app.log }),
+    log: app.log,
+  });
+  await app.register(makeAssistantRoutes({ ebay }), { prefix: "/assistant" });
 
   await fanout.start();
 

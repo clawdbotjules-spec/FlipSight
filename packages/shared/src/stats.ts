@@ -19,6 +19,20 @@ export function median(values: number[]): number {
   return percentile(values, 50);
 }
 
+/**
+ * Trim outliers with the IQR fence: values outside
+ * [p25 − k·IQR, p75 + k·IQR] are dropped (default k = 1.5).
+ */
+export function trimOutliersIQR(values: number[], k = 1.5): number[] {
+  if (values.length < 4) return [...values];
+  const p25 = percentile(values, 25);
+  const p75 = percentile(values, 75);
+  const iqr = p75 - p25;
+  const lo = p25 - k * iqr;
+  const hi = p75 + k * iqr;
+  return values.filter((v) => v >= lo && v <= hi);
+}
+
 export interface CompStats {
   median: number;
   p25: number;

@@ -1,9 +1,13 @@
 /**
- * Token-bucket rate limiter. Each source worker owns one bucket per upstream
- * host, sized from `Source.config`. `take()` resolves when a token is
- * available; waits are logged so rate-limit compliance is provable from logs.
+ * Token-bucket rate limiter (dependency-free — loggers are structural so the
+ * API, workers, and scripts can all use it). Waits are logged as
+ * `rate_limited` events so rate-limit compliance is provable from logs.
  */
-import type { Logger } from "pino";
+
+export interface LoggerLike {
+  info(obj: Record<string, unknown>, msg?: string): void;
+  warn(obj: Record<string, unknown>, msg?: string): void;
+}
 
 export interface TokenBucketOptions {
   name: string;
@@ -11,7 +15,7 @@ export interface TokenBucketOptions {
   ratePerSec: number;
   /** Bucket capacity (burst size). Defaults to ceil(ratePerSec), min 1. */
   burst?: number;
-  log?: Logger;
+  log?: LoggerLike;
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -38,9 +42,7 @@ export class TokenBucket {
     }
   }
 
-  /**
-   * Acquire `cost` tokens, waiting as needed. Returns milliseconds waited.
-   */
+  /** Acquire `cost` tokens, waiting as needed. Returns milliseconds waited. */
   async take(cost = 1): Promise<number> {
     const myTurn = this.queueTail;
     let release!: () => void;
@@ -79,4 +81,16 @@ export async function politeDelay(minMs: number, maxMs: number): Promise<number>
   const ms = Math.floor(minMs + Math.random() * Math.max(0, maxMs - minMs));
   await sleep(ms);
   return ms;
+}
+
+export class HttpStatusError extends Error {
+  constructor(
+    public readonly url: string,
+    public readonly status: number,
+    public readonly retryAfterMs: number | null,
+    bodyPreview: string,
+  ) {
+    super(`HTTP ${status} from ${new URL(url).host}: ${bodyPreview.slice(0, 200)}`);
+    this.name = "HttpStatusError";
+  }
 }

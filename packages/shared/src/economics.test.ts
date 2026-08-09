@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import { computeDealEconomics, estimateEbayFees, scoreDeal } from "./economics.js";
 
 describe("estimateEbayFees", () => {
-  it("applies 13.25% + $0.40", () => {
-    expect(estimateEbayFees(100)).toBe(13.65);
-    expect(estimateEbayFees(120)).toBe(16.3);
+  it("applies 13.6% + $0.30 by default", () => {
+    expect(estimateEbayFees(100)).toBe(13.9);
+    expect(estimateEbayFees(120)).toBe(16.62);
+  });
+
+  it("accepts overrides", () => {
+    expect(estimateEbayFees(100, { pct: 6.35, fixed: 0.3 })).toBe(6.65);
   });
 
   it("returns 0 for non-positive prices", () => {
@@ -16,10 +20,10 @@ describe("estimateEbayFees", () => {
 describe("computeDealEconomics", () => {
   it("computes net profit and ROI with defaults", () => {
     const econ = computeDealEconomics({ buyPrice: 45, estimatedResale: 120 });
-    expect(econ.estFees).toBe(16.3);
+    expect(econ.estFees).toBe(16.62);
     expect(econ.estShipping).toBe(12.99);
-    expect(econ.netProfit).toBe(45.71);
-    expect(econ.roiPct).toBe(101.58);
+    expect(econ.netProfit).toBe(45.39);
+    expect(econ.roiPct).toBe(100.87);
   });
 
   it("honors explicit fees and shipping", () => {

@@ -32,10 +32,7 @@ later ship as a subscription deal-alert SaaS.
       graceful SIGTERM shutdown
 - [x] `worker-ebay` — Browse API sweeps: DB-driven keyword sets expanded with
       **programmatic brand misspellings** (dropped/swapped letters, missing
-      spaces), auctions ending ≤30 min with zero/low bids, newly-listed BINs;
-      plus the **sold-comps fetcher** (median/p25/p75 + sell-through) and the
-      global `valuate` consumer that turns comps into Valuations → Deals →
-      `deals:new`
+      spaces), auctions ending ≤30 min with zero/low bids, newly-listed BINs
 - [x] `worker-keepa` — ASIN watchlists + best-seller ranges, PriceSnapshot
       history, price-drop (>30% under 90-day avg) and **Amazon pricing
       error** (<40% of 90-day median) detection
@@ -56,26 +53,61 @@ later ship as a subscription deal-alert SaaS.
       categories are DB rows editable via the API (validated with the same
       zod schemas the workers parse)
 
-Phase 3+: the Next.js web UI, Discord/Pushover alert channels, AI listing
-drafting, and the `caddy` edge (slots reserved in `docker-compose.yml`).
+**Phase 3 — valuation + scoring engine, multi-channel alerts, AI listing
+assistant: complete.**
+
+- [x] `worker-valuate` — the dedicated `valuate` consumer every source worker
+      feeds: **identify** (UPC/ASIN/ISBN → Anthropic title normalization with
+      an hourly budget → heuristic fallback) → **comps** (eBay sold median
+      over 90 days with **IQR outlier trimming** + Keepa when an ASIN exists,
+      cached in Redis 24 h keyed by normalized product name) → **economics**
+      (per-category eBay fees, default 13.6% + $0.30, and a weight/category
+      shipping lookup table — both editable via `PUT /settings/:key`) →
+      **score 0–100** (profit 35 / ROI 25 / sell-through 15 / comp confidence
+      15, **time pressure** up to +10 as auctions close, **risk flags** −6
+      each: vague title, as-is/untested, parts-only, no returns, stock photo)
+- [x] Deals open when score ≥ threshold **and** net profit clears the
+      configurable floor; every Deal carries a full `meta` breakdown
+      (identity, fee %, shipping rule, score components, comp sample) shown
+      in alerts and the API
+- [x] **Discord + Pushover delivery** in addition to WebSockets: one rich
+      embed / message per deal per channel, `AlertEvent` bookkeeping per
+      (deal × rule × channel) with delivery timestamps on 2xx
+- [x] `POST /assistant/listing` — photos + a few words → Claude drafts a
+      comp-optimized eBay listing (≤80-char title, item specifics, honest
+      description) with a suggested price from the comp engine (structured
+      JSON via `zodOutputFormat`)
+- [x] `AppSetting` config store with zod-validated `GET/PUT /settings/:key`
+      (`fees`, `shipping`, `valuation`) — workers re-read within 60 s, no
+      restarts
+- [x] Unit tests on the fee math, shipping resolution, scoring components,
+      risk flags, and IQR trimming (52 tests); acceptance verified live on
+      the host **and** in the 9-service Docker stack: seeded underpriced item
+      → Deal with sane, self-consistent math in **0.9–1.1 s** end-to-end,
+      Discord webhook received the embed, WebSocket pushed in 2 ms
+
+Phase 4+: the Next.js web UI and the `caddy` edge (slots reserved in
+`docker-compose.yml`).
 
 ## Architecture
 
 ```
   eBay Browse API ──▶ worker-ebay ────┐        ┌──────────────────────────────┐
-  Keepa (Amazon) ──▶ worker-keepa ───┤        │  valuate queue (BullMQ)      │
-  ShopGoodwill ────▶ worker-goodwill ─┼──────▶ │  consumer in worker-ebay:    │
-  Target/Walmart ──▶ worker-retail ───┤ Items  │  sold comps (median/p25/p75, │
-  EstateSales/HiBid ▶ worker-estate ──┘  +     │  sell-through) → Valuation → │
-                                      valuate  │  Deal → publish deals:new    │
-                                      jobs     └──────────────┬───────────────┘
-                                                              │ Redis pub/sub
-                                                              ▼
+  Keepa (Amazon) ──▶ worker-keepa ───┤        │ worker-valuate               │
+  ShopGoodwill ────▶ worker-goodwill ─┼──────▶ │ identify (codes→AI→heuristic)│
+  Target/Walmart ──▶ worker-retail ───┤ Items  │ → comps (IQR-trimmed eBay    │
+  EstateSales/HiBid ▶ worker-estate ──┘  +     │   sold + Keepa, 24h cache)   │
+                                      valuate  │ → fees/shipping → score v2   │
+                                      jobs     │ → Deal → publish deals:new   │
+                                               └──┬───────────┬───────────────┘
+                                     Redis pub/sub│           │ Discord webhook
+                                                  ▼           ▼ + Pushover
  ┌──────────┐  SQL   ┌───────────────────────────────┐  WebSocket   ┌────────┐
  │ Postgres │ ◀────▶ │ api (Fastify)                 │ ───────────▶ │ web /  │
  │ 16       │        │ REST + JWT + rate limiting    │  deal.new    │ clients│
  └──────────┘        │ DealFanout: match alert rules │ < 1s budget  └────────┘
                      │ per connected user            │
+                     │ /settings · /assistant/listing│
                      └───────────────────────────────┘
 ```
 
@@ -83,14 +115,17 @@ Each worker is an isolated BullMQ process: repeatable schedules persisted in
 Redis (crash → restart → resume), a per-source token bucket (waits are logged
 as `rate_limited` events with `throttledMs` on every request — rate-limit
 compliance is provable from logs), exponential-backoff retries, and a global
-`dead-letter` queue that captures jobs which exhaust their attempts. Workers
-write/update `Item` rows and enqueue `valuate` jobs; the valuator prices
-items against real eBay sold comps, records Valuations, and publishes deals.
-The API's `DealFanout` subscribes to `deals:new`, matches each deal against
-the **enabled alert rules of every connected user** (30 s cache, invalidated
-via `rules:changed`), pushes over plain WebSockets, records `AlertEvent`
-rows, and flips deals `new → alerted`. Heavy work never runs in request
-handlers.
+`dead-letter` queue that captures jobs which exhaust their attempts. Source
+workers write/update `Item` rows and enqueue `valuate` jobs; `worker-valuate`
+identifies the product, prices it against IQR-trimmed sold comps, applies the
+configurable fee/shipping tables, scores it (time pressure + risk flags),
+records a Valuation for every job, and — when the score and net-profit gates
+pass — creates the Deal, publishes `deals:new`, and delivers Discord/Pushover
+alerts for matching rules. The API's `DealFanout` subscribes to `deals:new`,
+matches each deal against the **enabled alert rules of every connected user**
+(30 s cache, invalidated via `rules:changed`), pushes over plain WebSockets,
+records `AlertEvent` rows, and flips deals `new → alerted`. Heavy work never
+runs in request handlers.
 
 ### Politeness & legality
 
@@ -110,8 +145,8 @@ to hard-disable those fetches instead.
 
 ```bash
 cp .env.example .env         # defaults work for local dev; set JWT_SECRET
-docker compose up --build -d # postgres + redis + api, migrations run on boot
-docker compose ps            # wait for all three to report healthy
+docker compose up --build -d # postgres + redis + api + 6 workers, migrations on boot
+docker compose ps            # wait for all nine to report healthy
 
 # seed sources + demo user (demo@flipsight.dev / flipsight-demo) + default rule
 docker compose exec api node packages/db/dist/seed.js
@@ -136,13 +171,21 @@ Terminal A prints the deal within a few milliseconds:
 
 With the stack up (Docker or local), one command proves the whole loop —
 register → login → create rule → WebSocket connect → deal injected → alert
-received in under 1 second → deal in feed → claim:
+received in under 1 second → deal in feed → claim — then the phase-3 engine:
+`seed:item` inserts a fake underpriced item (embedded demo comps including a
+$499 outlier), and the script waits for `worker-valuate` to turn it into a
+Deal, re-computes the fee/shipping/net-profit math from the payload's own
+`meta` breakdown, and asserts the outlier was IQR-trimmed:
 
 ```bash
 npm install && npm run build   # once
-npm run smoke
+npm run smoke                  # SMOKE_PHASE3=0 to run only the phase-1 part
 # …
-# [smoke] ACCEPTANCE PASS — alert latency 9ms (budget 1000ms)
+# [smoke]     fees: $20.77 = 13.6% + $0.3 (default schedule)
+# [smoke]     shipping: $14.99 (rule: category:Electronics)
+# [smoke]     net: $150.48 - $45 buy - $20.77 fees - $14.99 ship = $69.72 (ROI 154.93%)
+# [smoke]     score 61: profit 24.4 + roi 19.4 + sell-through 8.9 + comp-confidence 7.8 + time-pressure 7 - risk 6 (no_returns)
+# [smoke] ACCEPTANCE PASS — phase 1 alert 5ms; phase 3 pipeline 0.9s, publish->ws 2ms (budget 1000ms)
 ```
 
 ## Local development (no Docker for the API)
@@ -162,13 +205,14 @@ Useful scripts (repo root):
 
 | Script              | What it does                                        |
 | ------------------- | --------------------------------------------------- |
-| `npm run build`     | Compile `shared` → `db` → `api`                     |
-| `npm test`          | Unit tests (rule matching, deal economics)          |
+| `npm run build`     | Compile all workspaces in dependency order          |
+| `npm test`          | Unit tests (rule matching, economics, fees/shipping, scoring, comp stats) |
 | `npm run db:migrate`| Create/apply migrations against `DATABASE_URL`      |
-| `npm run db:seed`   | Sources + demo user + default alert rule (idempotent) |
-| `npm run seed:deal` | Insert a demo deal and publish it on `deals:new`    |
+| `npm run db:seed`   | Sources + demo user + default alert rule + app settings (idempotent) |
+| `npm run seed:deal` | Insert a pre-valued demo deal and publish it on `deals:new` |
+| `npm run seed:item` | Insert a fake underpriced Item + enqueue a `valuate` job (phase-3 demo) |
 | `npm run listen`    | Log in as demo user and stream alerts to the terminal |
-| `npm run smoke`     | End-to-end acceptance test                          |
+| `npm run smoke`     | End-to-end acceptance test (phases 1 + 3)           |
 
 ## API
 
@@ -200,6 +244,10 @@ global rate limit 300 req/min (20/min on credential endpoints).
 | `POST /searches`           | ✓    | Create `{sourceKey, name, params, enabled?}` — params zod-validated per source |
 | `PATCH /searches/:id`      | ✓    | Update name/params/enabled (workers pick changes up next sweep) |
 | `DELETE /searches/:id`     | ✓    | Delete a saved search |
+| `GET /settings`            | ✓    | Effective valuation config: `fees`, `shipping`, `valuation` (defaults merged in) |
+| `GET /settings/:key`       | ✓    | One setting (`fees` \| `shipping` \| `valuation`) |
+| `PUT /settings/:key`       | ✓    | Replace a setting — zod-validated against the same schema workers parse; picked up within 60 s, no restarts |
+| `POST /assistant/listing`  | ✓    | AI listing draft: `{notes, imageUrls?, imagesBase64?, itemId?}` → `{draft{title ≤80, itemSpecifics, description, condition, …}, pricing{suggested, low, high, basis}}`. 5 req/min; 503 without `ANTHROPIC_API_KEY` |
 
 ### WebSocket
 
@@ -219,7 +267,15 @@ Server messages:
     "id": "…", "status": "new", "buyPrice": 45, "estFees": 16.3,
     "estShipping": 12.99, "netProfit": 45.71, "roiPct": 101.58, "score": 60,
     "item": { "title": "…", "category": "Tools", "sourceKey": "ebay", "sourceUrl": "…", "location": null, "…": "…" },
-    "valuation": { "estimatedResale": 120, "resaleLow": 95, "resaleHigh": 140, "soldCompsCount": 27, "sellThroughRate": 0.82, "compSource": "ebay_sold" }
+    "valuation": { "estimatedResale": 120, "resaleLow": 95, "resaleHigh": 140, "soldCompsCount": 27, "sellThroughRate": 0.82, "compSource": "ebay_sold" },
+    "meta": {                          // present on engine-created deals
+      "identity": { "canonicalName": "…", "method": "upc|asin|isbn|ai|heuristic" },
+      "fees": { "pct": 13.6, "fixed": 0.3, "matchedCategory": null },
+      "shipping": { "cost": 14.99, "rule": "category:Electronics" },
+      "riskFlags": ["no_returns"],
+      "scoreBreakdown": { "score": 61, "profitPts": 24.4, "roiPts": 19.4, "sellThroughPts": 8.9, "compConfidencePts": 7.8, "timePressurePts": 7, "riskPenalty": 6 },
+      "comps": { "source": "ebay_sold", "sampleSize": 12, "trimmedOutliers": 1, "activeCount": 9 }
+    }
   }
 }
 ```
@@ -229,7 +285,9 @@ A deal is delivered to a user when **any** of their enabled rules with the
 `categories` (empty = all), `keywords` (any must appear in the title),
 `excludeKeywords` (none may appear), `localOnly` (item must have a pickup
 location). Matching logic lives in `packages/shared/src/matching.ts` and is
-unit-tested — future Discord/Pushover workers reuse the same function.
+unit-tested — `worker-valuate`'s Discord/Pushover delivery reuses the same
+function against rules carrying those channels (one message per deal per
+channel, `AlertEvent` rows per deal × rule × channel).
 
 ## Data model
 
@@ -238,6 +296,9 @@ unit-tested — future Discord/Pushover workers reuse the same function.
 - **Source** — one row per feed (`ebay`, `keepa_amazon`, `shopgoodwill`,
   `walmart_clearance`, `target_clearance`, `estatesales`) with `enabled` and
   per-source worker `config` JSON.
+- **AppSetting** — key/value config store for the valuation engine (`fees`,
+  `shipping`, `valuation`), zod-validated on write via `PUT /settings/:key`
+  and re-read by workers within 60 s.
 - **Item** — canonical product record per source listing (`sourceId` +
   `externalId` unique), UPC/ISBN/ASIN when known, prices as `Decimal(12,2)`,
   `location` for local-pickup items, raw payload retained.
@@ -245,7 +306,8 @@ unit-tested — future Discord/Pushover workers reuse the same function.
   count, sell-through rate, comp source (`ebay_sold` | `keepa`).
 - **Deal** — buy price, estimated fees/shipping, net profit, ROI %, 0–100
   score, lifecycle `new → alerted → claimed → purchased → sold` (or
-  `dismissed`), claimed-by user.
+  `dismissed`), claimed-by user, plus a `meta` JSON breakdown (identity,
+  fee/shipping resolution, score components, risk flags, comp sample).
 - **AlertRule / AlertEvent** — per-user thresholds + delivery bookkeeping
   (unique per deal × rule × channel).
 - **FlipLedger** — actual purchases and sales; powers `GET /ledger/summary`.
@@ -254,10 +316,12 @@ unit-tested — future Discord/Pushover workers reuse the same function.
 
 All variables documented in [`.env.example`](.env.example): `DATABASE_URL`,
 `REDIS_URL`, `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `KEEPA_API_KEY`,
-`ANTHROPIC_API_KEY`, `DISCORD_WEBHOOK_URL`, `PUSHOVER_TOKEN`,
-`PUSHOVER_USER`, `JWT_SECRET`, `APP_URL` (worker/AI/alert keys are consumed
-in later phases). docker-compose substitutes from `.env` and wires container
-networking automatically.
+`ANTHROPIC_API_KEY` (AI identify + estate analysis + listing assistant),
+`DISCORD_WEBHOOK_URL` and `PUSHOVER_TOKEN`/`PUSHOVER_USER` (deal alert
+channels in `worker-valuate`), `JWT_SECRET`, `APP_URL`. Everything optional
+degrades gracefully — a missing key disables that capability with a clear
+log, never a crash. docker-compose substitutes from `.env` and wires
+container networking automatically.
 
 ## Principles
 
@@ -286,11 +350,12 @@ keys idles with a clear log instead of crashing:
 
 | Worker | Sources | Needs env | Without it |
 | --- | --- | --- | --- |
-| `worker-ebay` | eBay Browse + Marketplace Insights (+ `valuate` consumer) | `EBAY_CLIENT_ID/SECRET` | sweeps + valuations idle |
+| `worker-ebay` | eBay Browse + Marketplace Insights sweeps | `EBAY_CLIENT_ID/SECRET` | sweeps idle |
 | `worker-keepa` | Keepa (Amazon history) | `KEEPA_API_KEY` | sweeps idle |
 | `worker-goodwill` | ShopGoodwill public listings | — | fully live |
 | `worker-retail` | Target (redsky public), Walmart (affiliate API) | `HOME_ZIP`; Walmart keys optional | Target live, Walmart disabled |
 | `worker-estate` | EstateSales.net, RSS (HiBid) + Claude analysis | `HOME_ZIP`; `ANTHROPIC_API_KEY` optional | leads stored without AI scores |
+| `worker-valuate` | `valuate` queue consumer: identify → comps → score → Deal → alerts | eBay keys for real comps; `ANTHROPIC_API_KEY`, `KEEPA_API_KEY`, `DISCORD_WEBHOOK_URL`, `PUSHOVER_*` all optional | heuristic identify, demo-comps items only, WS-only alerts |
 
 Failure handling: transient errors retry with exponential backoff; jobs that
 exhaust attempts land in the global `dead-letter` queue with the failure
@@ -301,19 +366,26 @@ schedulers resume, prior completed jobs intact.
 ## Repository layout
 
 ```
-apps/api/             Fastify API + WebSocket fan-out (Dockerfile here)
-apps/worker-ebay/     eBay sweeps + sold-comps fetcher + valuate consumer
+apps/api/             Fastify API + WebSocket fan-out + settings + listing
+                      assistant (Dockerfile here)
+apps/worker-ebay/     eBay Browse sweeps (keywords + misspellings, ending-soon,
+                      newly-listed)
 apps/worker-keepa/    Keepa/Amazon watchlists, price history, anomaly flags
 apps/worker-goodwill/ ShopGoodwill polite category poller
 apps/worker-retail/   Retail clearance plugins (sources/retail/{walmart,target}.ts)
 apps/worker-estate/   Estate-sale feeds + Anthropic analysis
+apps/worker-valuate/  Valuation engine: identify → comps → economics → score →
+                      Deal → deals:new + Discord/Pushover delivery
 packages/db/          Prisma schema, migrations, seeds, client wrapper
 packages/shared/      Cross-service contracts: realtime payloads, rule matching,
-                      deal economics, misspellings, comp stats, source configs
-packages/worker-core/ Worker chassis: BullMQ app, token bucket, robots guard,
-                      polite HTTP client, checkpoints, DLQ, health server
-docker/               worker.Dockerfile (shared by all five workers)
+                      deal economics, scoring, fee/shipping config, comp stats
+packages/worker-core/ Worker chassis: BullMQ app, robots guard, polite HTTP
+                      client, checkpoints, DLQ, health server, app settings
+packages/clients/     Marketplace/AI clients shared by workers and the API:
+                      eBay, Keepa, comps engine, product identifier, listing
+                      assistant
+docker/               worker.Dockerfile (shared by all six workers)
 scripts/              smoke.mjs (acceptance), listen.mjs (live deal watcher)
 caddy/Caddyfile       Edge config for the later web + HTTPS phase
-docker-compose.yml    postgres + redis + api + 5 workers (slots for web/caddy)
+docker-compose.yml    postgres + redis + api + 6 workers (slots for web/caddy)
 ```

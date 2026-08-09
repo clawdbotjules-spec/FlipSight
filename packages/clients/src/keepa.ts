@@ -3,8 +3,7 @@
  * shared bucket paces requests to the configured tokens/minute, and the
  * client also surfaces Keepa's own tokensLeft so sweeps back off when low.
  */
-import type { Logger, TokenBucket } from "@flipsight/worker-core";
-import { HttpStatusError } from "@flipsight/worker-core";
+import { HttpStatusError, type LoggerLike, type TokenBucket } from "@flipsight/shared";
 
 const KEEPA_API = "https://api.keepa.com";
 
@@ -44,7 +43,7 @@ export class KeepaClient {
       apiKey: string | undefined;
       domain: number;
       bucket: TokenBucket;
-      log: Logger;
+      log: LoggerLike;
     },
   ) {}
 

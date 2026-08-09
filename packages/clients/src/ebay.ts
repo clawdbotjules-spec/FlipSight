@@ -3,8 +3,7 @@
  * API search, and Marketplace Insights sold-comps search. All calls go
  * through the shared token bucket so the worker's rate limit is provable.
  */
-import type { Logger, TokenBucket } from "@flipsight/worker-core";
-import { HttpStatusError } from "@flipsight/worker-core";
+import { HttpStatusError, type LoggerLike, type TokenBucket } from "@flipsight/shared";
 
 const EBAY_API = "https://api.ebay.com";
 const BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope";
@@ -56,7 +55,7 @@ export interface EbayClientOptions {
   clientSecret: string | undefined;
   marketplaceId: string;
   bucket: TokenBucket;
-  log: Logger;
+  log: LoggerLike;
 }
 
 export class EbayClient {

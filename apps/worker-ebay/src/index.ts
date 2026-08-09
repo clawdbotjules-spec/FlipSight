@@ -1,13 +1,14 @@
 /**
- * worker-ebay — isolated BullMQ worker process for the eBay source.
- * Also hosts the global `valuate` queue consumer (it owns the sold-comps
- * fetcher every valuation depends on).
+ * worker-ebay — isolated BullMQ worker process for the eBay source: saved
+ * keyword-set sweeps (with programmatic brand misspellings), auctions ending
+ * soon with zero/low bids, and newly-listed BIN items. Valuation happens in
+ * the dedicated worker-valuate service, which consumes the jobs this worker
+ * enqueues.
  */
+import { EbayClient } from "@flipsight/clients";
 import { EbaySourceConfigSchema } from "@flipsight/shared";
-import { TokenBucket, VALUATE_QUEUE, WorkerApp } from "@flipsight/worker-core";
-import { EbayClient } from "./ebay-client.js";
+import { TokenBucket, WorkerApp } from "@flipsight/worker-core";
 import { makeEndingSoonSweep, makeNewlyListedSweep, makeSavedSearchSweep } from "./sweeps.js";
-import { makeValuateProcessor } from "./valuator.js";
 
 const QUEUE = "ebay";
 
@@ -45,14 +46,9 @@ app.process(QUEUE, async (job) => {
   }
 });
 
-app.process(VALUATE_QUEUE, makeValuateProcessor(app, client), { concurrency: 2 });
-
 await app.scheduleEvery(QUEUE, "ebay:saved-searches", cfg.sweeps.savedSearchEverySec * 1000, "sweep:saved-searches");
 await app.scheduleEvery(QUEUE, "ebay:ending-soon", cfg.sweeps.endingSoonEverySec * 1000, "sweep:ending-soon");
 await app.scheduleEvery(QUEUE, "ebay:newly-listed", cfg.sweeps.newlyListedEverySec * 1000, "sweep:newly-listed");
 
 app.setHealth({ ebayConfigured: client.isConfigured() });
-app.log.info(
-  { configured: client.isConfigured(), sweeps: cfg.sweeps },
-  "worker-ebay ready (sweeps scheduled, valuate consumer online)",
-);
+app.log.info({ configured: client.isConfigured(), sweeps: cfg.sweeps }, "worker-ebay ready (sweeps scheduled)");

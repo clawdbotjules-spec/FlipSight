@@ -13,13 +13,14 @@ export function clamp(n: number, min: number, max: number): number {
 }
 
 /**
- * Estimated eBay selling fees for a given sale price: ~13.25% final value fee
- * on most categories plus the $0.40 per-order fee. Deliberately conservative;
- * per-category fee tables can refine this in the valuation worker later.
+ * Estimated eBay selling fees for a given sale price: ~13.6% final value fee
+ * plus the $0.30 per-order fee (spec defaults). The valuation engine uses the
+ * per-category fee schedule from AppSetting "fees" (see settings-config.ts);
+ * this flat helper backs seeds and sources without category context.
  */
-export function estimateEbayFees(salePrice: number): number {
+export function estimateEbayFees(salePrice: number, opts: { pct?: number; fixed?: number } = {}): number {
   if (salePrice <= 0) return 0;
-  return round2(salePrice * 0.1325 + 0.4);
+  return round2(salePrice * ((opts.pct ?? 13.6) / 100) + (opts.fixed ?? 0.3));
 }
 
 export interface DealEconomicsInput {

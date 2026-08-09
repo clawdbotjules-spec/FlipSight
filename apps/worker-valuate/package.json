@@ -1,8 +1,8 @@
 {
-  "name": "@flipsight/worker-keepa",
+  "name": "@flipsight/worker-valuate",
   "version": "0.1.0",
   "private": true,
-  "description": "Keepa/Amazon worker: ASIN watchlists + best-seller ranges, price-drop and pricing-error detection, price history snapshots.",
+  "description": "Valuation + scoring engine: identifies products (UPC/ASIN/ISBN or AI), comps them (eBay sold IQR-trimmed + Keepa), computes configurable fee/shipping economics, scores 0-100, creates Deals, and delivers Discord/Pushover alerts.",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
@@ -18,8 +18,8 @@
     "@flipsight/worker-core": "*"
   },
   "devDependencies": {
-    "typescript": "^7.0.2",
+    "@types/node": "^26.2.0",
     "tsx": "^4.23.11",
-    "@types/node": "^26.2.0"
+    "typescript": "^7.0.2"
   }
 }

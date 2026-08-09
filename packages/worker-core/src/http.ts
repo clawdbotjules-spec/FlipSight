@@ -6,10 +6,10 @@
  * job, which retries with backoff and eventually dead-letters.
  */
 import { createHash } from "node:crypto";
+import { HttpStatusError, type TokenBucket } from "@flipsight/shared";
 import type { Logger } from "pino";
 import type { CheckpointStore } from "./checkpoints.js";
 import { RobotsDisallowedError, type RobotsGuard } from "./robots.js";
-import type { TokenBucket } from "./token-bucket.js";
 
 export const DEFAULT_USER_AGENT =
   "FlipSightBot/0.1 (+https://github.com/clawdbotjules-spec/FlipSight; polite; contact via repo)";
@@ -45,18 +45,6 @@ export interface HttpResult {
   headers: Headers;
   text: string;
   json<T>(): T;
-}
-
-export class HttpStatusError extends Error {
-  constructor(
-    public readonly url: string,
-    public readonly status: number,
-    public readonly retryAfterMs: number | null,
-    bodyPreview: string,
-  ) {
-    super(`HTTP ${status} from ${new URL(url).host}: ${bodyPreview.slice(0, 200)}`);
-    this.name = "HttpStatusError";
-  }
 }
 
 interface CacheValidators {
