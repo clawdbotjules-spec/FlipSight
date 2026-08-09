@@ -1,0 +1,22 @@
+# Caddy reverse proxy — enabled in a later phase alongside the web app.
+# Set APP_DOMAIN (e.g. flipsight.example.com) for automatic HTTPS;
+# defaults to localhost with Caddy's internal CA for local use.
+
+{$APP_DOMAIN:localhost} {
+	# REST API + WebSocket endpoint (Caddy proxies WS upgrades transparently).
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:4000
+	}
+	handle /ws {
+		reverse_proxy api:4000
+	}
+	handle /health {
+		reverse_proxy api:4000
+	}
+
+	# Next.js frontend.
+	handle {
+		reverse_proxy web:3000
+	}
+}
