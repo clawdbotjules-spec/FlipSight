@@ -18,26 +18,59 @@ later ship as a subscription deal-alert SaaS.
       filters), claim/dismiss, flip ledger + P&L summary
 - [x] Realtime layer: Redis pub/sub `deals:new` → per-user rule matching →
       native WebSocket push (measured publish→client latency: **2–9 ms**)
-- [x] Dockerized stack (`postgres` + `redis` + `api`) with healthchecks,
-      `restart: unless-stopped`, and automatic migrations on boot
+- [x] Dockerized stack with healthchecks, `restart: unless-stopped`, and
+      automatic migrations on boot
 - [x] End-to-end acceptance test (`npm run smoke`)
 
-Later phases (service slots already reserved in `docker-compose.yml`):
-per-source BullMQ workers (`worker-ebay`, `worker-keepa`, `worker-retail`,
-`worker-goodwill`, `worker-estate`), Anthropic-powered enrichment (listing
-drafting, photo/description classification, estate-sale parsing), the
-Next.js web app, Discord/Pushover alert channels, and the `caddy` edge.
+**Phase 2 — source workers: complete.**
+
+- [x] `@flipsight/worker-core` framework: BullMQ queues + repeatable
+      schedulers (Redis-persisted → sweeps resume after crashes), per-source
+      token-bucket rate limiting with `rate_limited`/`throttledMs` log
+      evidence, robots.txt guard, conditional-request HTTP client, structured
+      pino logging, a global dead-letter queue, `/health` per worker, and
+      graceful SIGTERM shutdown
+- [x] `worker-ebay` — Browse API sweeps: DB-driven keyword sets expanded with
+      **programmatic brand misspellings** (dropped/swapped letters, missing
+      spaces), auctions ending ≤30 min with zero/low bids, newly-listed BINs;
+      plus the **sold-comps fetcher** (median/p25/p75 + sell-through) and the
+      global `valuate` consumer that turns comps into Valuations → Deals →
+      `deals:new`
+- [x] `worker-keepa` — ASIN watchlists + best-seller ranges, PriceSnapshot
+      history, price-drop (>30% under 90-day avg) and **Amazon pricing
+      error** (<40% of 90-day median) detection
+- [x] `worker-goodwill` — polite polling of ShopGoodwill categories
+      (~1 req/2.5 s + jitter, content-hash caching, robots-aware); extracts
+      title / current bid / ends-at / images. **Verified live**: hundreds of
+      real items ingested across Electronics/Tools/Cameras/Instruments
+- [x] `worker-retail` — plugin system (`sources/retail/walmart.ts`,
+      `target.ts`, shared interface): Target via public redsky endpoints
+      (**verified live** — real >50%-off clearance detected) with per-store
+      inventory near `HOME_ZIP`; Walmart via the official affiliate API when
+      credentials are provided
+- [x] `worker-estate` — EstateSales.net + RSS feeds around `HOME_ZIP`
+      (**verified live**), Anthropic-powered extraction of notable brands /
+      categories / worth-attending score (structured outputs), stored as
+      `estate_lead` Items
+- [x] `/searches` CRUD — every worker's keyword sets / watchlists /
+      categories are DB rows editable via the API (validated with the same
+      zod schemas the workers parse)
+
+Phase 3+: the Next.js web UI, Discord/Pushover alert channels, AI listing
+drafting, and the `caddy` edge (slots reserved in `docker-compose.yml`).
 
 ## Architecture
 
 ```
-                     ┌─────────────────────────────────────────────┐
-   marketplaces ───▶ │ per-source workers (BullMQ, phase 2+)       │
-   & clearance feeds │ poll politely → upsert Item → Valuation →   │
-                     │ create Deal → publish deals:new             │
-                     └───────────────┬─────────────────────────────┘
-                                     │ Redis pub/sub  deals:new
-                                     ▼
+  eBay Browse API ──▶ worker-ebay ────┐        ┌──────────────────────────────┐
+  Keepa (Amazon) ──▶ worker-keepa ───┤        │  valuate queue (BullMQ)      │
+  ShopGoodwill ────▶ worker-goodwill ─┼──────▶ │  consumer in worker-ebay:    │
+  Target/Walmart ──▶ worker-retail ───┤ Items  │  sold comps (median/p25/p75, │
+  EstateSales/HiBid ▶ worker-estate ──┘  +     │  sell-through) → Valuation → │
+                                      valuate  │  Deal → publish deals:new    │
+                                      jobs     └──────────────┬───────────────┘
+                                                              │ Redis pub/sub
+                                                              ▼
  ┌──────────┐  SQL   ┌───────────────────────────────┐  WebSocket   ┌────────┐
  │ Postgres │ ◀────▶ │ api (Fastify)                 │ ───────────▶ │ web /  │
  │ 16       │        │ REST + JWT + rate limiting    │  deal.new    │ clients│
@@ -46,12 +79,32 @@ Next.js web app, Discord/Pushover alert channels, and the `caddy` edge.
                      └───────────────────────────────┘
 ```
 
-Deal producers (workers today, the seed script in phase 1) write to Postgres
-and publish the full deal payload on `deals:new`. The API's `DealFanout`
-subscribes, matches each deal against the **enabled alert rules of every
-connected user** (30 s in-memory cache, invalidated via `rules:changed`),
-pushes over plain WebSockets, records `AlertEvent` rows, and flips the deal
-`new → alerted`. Heavy work never runs in request handlers.
+Each worker is an isolated BullMQ process: repeatable schedules persisted in
+Redis (crash → restart → resume), a per-source token bucket (waits are logged
+as `rate_limited` events with `throttledMs` on every request — rate-limit
+compliance is provable from logs), exponential-backoff retries, and a global
+`dead-letter` queue that captures jobs which exhaust their attempts. Workers
+write/update `Item` rows and enqueue `valuate` jobs; the valuator prices
+items against real eBay sold comps, records Valuations, and publishes deals.
+The API's `DealFanout` subscribes to `deals:new`, matches each deal against
+the **enabled alert rules of every connected user** (30 s cache, invalidated
+via `rules:changed`), pushes over plain WebSockets, records `AlertEvent`
+rows, and flips deals `new → alerted`. Heavy work never runs in request
+handlers.
+
+### Politeness & legality
+
+Only official APIs and public endpoints are used. Every scraper-style worker
+checks robots.txt per host, paces requests through a token bucket
+(ShopGoodwill: ~1 request / 2.5 s + randomized jitter; measured gaps
+2.4–2.6 s), sends conditional requests (ETag / Last-Modified) or
+content-hash caches to skip unchanged pages, and identifies itself with a
+contactable User-Agent. Facebook Marketplace is not touched. One documented
+judgment call: `buyerapi.shopgoodwill.com` (the JSON API behind
+shopgoodwill.com's own pages) serves a blanket `Disallow: /` aimed at search
+indexers; the worker's robots guard treats it as "warn" (fetch politely, log
+the conflict loudly) — set `robotsPolicy` to `enforce` in the source config
+to hard-disable those fetches instead.
 
 ## Quickstart (Docker)
 
@@ -143,6 +196,10 @@ global rate limit 300 req/min (20/min on credential endpoints).
 | `POST /ledger`             | ✓    | Record a purchase `{dealId, purchasePrice, purchasedAt?}` → deal `purchased` |
 | `PATCH /ledger/:id`        | ✓    | Record sale `{salePrice?, fees?, shipping?, soldAt?}` → computes `realizedProfit`, deal `sold` |
 | `GET /ledger/summary`      | ✓    | P&L totals: spent, revenue, fees, realized profit, avg ROI |
+| `GET /searches?source=`    | ✓    | Worker saved searches (keyword sets, ASIN watchlists, categories) |
+| `POST /searches`           | ✓    | Create `{sourceKey, name, params, enabled?}` — params zod-validated per source |
+| `PATCH /searches/:id`      | ✓    | Update name/params/enabled (workers pick changes up next sweep) |
+| `DELETE /searches/:id`     | ✓    | Delete a saved search |
 
 ### WebSocket
 
@@ -217,14 +274,46 @@ networking automatically.
 4. **Multi-tenant ready** — orgs, users, and per-user alert rules from day
    one, even with a single user today.
 
+## Workers
+
+Every worker container exposes `GET :8080/health` (DB/Redis checks + queue
+depths + last-sweep stats) and runs under `restart: unless-stopped`.
+Configuration lives in the DB: `Source.config` (rates, sweep intervals,
+thresholds, categories — see `packages/shared/src/source-config.ts` for every
+knob and default) and `SavedSearch` rows (what to search), both editable via
+the API without restarts. Credentials come from env; a worker without its
+keys idles with a clear log instead of crashing:
+
+| Worker | Sources | Needs env | Without it |
+| --- | --- | --- | --- |
+| `worker-ebay` | eBay Browse + Marketplace Insights (+ `valuate` consumer) | `EBAY_CLIENT_ID/SECRET` | sweeps + valuations idle |
+| `worker-keepa` | Keepa (Amazon history) | `KEEPA_API_KEY` | sweeps idle |
+| `worker-goodwill` | ShopGoodwill public listings | — | fully live |
+| `worker-retail` | Target (redsky public), Walmart (affiliate API) | `HOME_ZIP`; Walmart keys optional | Target live, Walmart disabled |
+| `worker-estate` | EstateSales.net, RSS (HiBid) + Claude analysis | `HOME_ZIP`; `ANTHROPIC_API_KEY` optional | leads stored without AI scores |
+
+Failure handling: transient errors retry with exponential backoff; jobs that
+exhaust attempts land in the global `dead-letter` queue with the failure
+reason, attempt count, and originating worker (inspect via Redis/BullMQ).
+Kill-test verified: `SIGKILL` on a worker → docker restarts it → Redis-backed
+schedulers resume, prior completed jobs intact.
+
 ## Repository layout
 
 ```
-apps/api/           Fastify API + WebSocket fan-out (Dockerfile here)
-packages/db/        Prisma schema, migrations, seeds, client wrapper
-packages/shared/    Cross-service contracts: realtime payloads, rule
-                    matching, deal economics, password hashing (unit-tested)
-scripts/            smoke.mjs (acceptance), listen.mjs (live deal watcher)
-caddy/Caddyfile     Edge config for the later web + HTTPS phase
-docker-compose.yml  postgres + redis + api (+ commented slots for phase 2+)
+apps/api/             Fastify API + WebSocket fan-out (Dockerfile here)
+apps/worker-ebay/     eBay sweeps + sold-comps fetcher + valuate consumer
+apps/worker-keepa/    Keepa/Amazon watchlists, price history, anomaly flags
+apps/worker-goodwill/ ShopGoodwill polite category poller
+apps/worker-retail/   Retail clearance plugins (sources/retail/{walmart,target}.ts)
+apps/worker-estate/   Estate-sale feeds + Anthropic analysis
+packages/db/          Prisma schema, migrations, seeds, client wrapper
+packages/shared/      Cross-service contracts: realtime payloads, rule matching,
+                      deal economics, misspellings, comp stats, source configs
+packages/worker-core/ Worker chassis: BullMQ app, token bucket, robots guard,
+                      polite HTTP client, checkpoints, DLQ, health server
+docker/               worker.Dockerfile (shared by all five workers)
+scripts/              smoke.mjs (acceptance), listen.mjs (live deal watcher)
+caddy/Caddyfile       Edge config for the later web + HTTPS phase
+docker-compose.yml    postgres + redis + api + 5 workers (slots for web/caddy)
 ```

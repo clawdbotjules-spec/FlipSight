@@ -8,11 +8,11 @@
  *       docker compose exec api node packages/db/dist/seed-deal.js
  */
 import {
+  buildDealAlertPayload,
   computeDealEconomics,
   DEALS_NEW_CHANNEL,
   loadEnvFile,
   scoreDeal,
-  type DealAlertPayload,
 } from "@flipsight/shared";
 import { Redis } from "ioredis";
 import { createPrismaClient, decN, type CompSource } from "./index.js";
@@ -164,8 +164,7 @@ async function main() {
       },
     });
 
-    const payload: DealAlertPayload = {
-      publishedAt: Date.now(),
+    const payload = buildDealAlertPayload({
       deal: {
         id: deal.id,
         status: deal.status,
@@ -175,29 +174,29 @@ async function main() {
         netProfit: decN(deal.netProfit),
         roiPct: deal.roiPct,
         score: deal.score,
-        createdAt: deal.createdAt.toISOString(),
-        item: {
-          id: item.id,
-          title: item.title,
-          category: item.category,
-          condition: item.condition,
-          imageUrls: item.imageUrls,
-          sourceUrl: item.sourceUrl,
-          currentPrice: decN(item.currentPrice),
-          location: item.location,
-          sourceKey: source.key,
-        },
-        valuation: {
-          id: valuation.id,
-          estimatedResale: decN(valuation.estimatedResale),
-          resaleLow: decN(valuation.resaleLow),
-          resaleHigh: decN(valuation.resaleHigh),
-          soldCompsCount: valuation.soldCompsCount,
-          sellThroughRate: valuation.sellThroughRate,
-          compSource: valuation.compSource,
-        },
+        createdAt: deal.createdAt,
       },
-    };
+      item: {
+        id: item.id,
+        title: item.title,
+        category: item.category,
+        condition: item.condition,
+        imageUrls: item.imageUrls,
+        sourceUrl: item.sourceUrl,
+        currentPrice: decN(item.currentPrice),
+        location: item.location,
+        sourceKey: source.key,
+      },
+      valuation: {
+        id: valuation.id,
+        estimatedResale: decN(valuation.estimatedResale),
+        resaleLow: decN(valuation.resaleLow),
+        resaleHigh: decN(valuation.resaleHigh),
+        soldCompsCount: valuation.soldCompsCount,
+        sellThroughRate: valuation.sellThroughRate,
+        compSource: valuation.compSource,
+      },
+    });
 
     const receivers = await redis.publish(DEALS_NEW_CHANNEL, JSON.stringify(payload));
     console.log(

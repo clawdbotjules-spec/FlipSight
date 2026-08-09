@@ -72,7 +72,49 @@ model Source {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  items Item[]
+  items         Item[]
+  savedSearches SavedSearch[]
+}
+
+/// DB-driven search definitions the workers execute each sweep — keyword sets,
+/// ASIN watchlists, category subscriptions. Editable from the UI/API.
+model SavedSearch {
+  id        String   @id @default(cuid())
+  sourceId  String
+  source    Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  name      String
+  enabled   Boolean  @default(true)
+  /// Kind-specific parameters; validated against per-source zod schemas.
+  params    Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sourceId, enabled])
+}
+
+/// Point-in-time price observations (Keepa history, future trend charts).
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  itemId     String
+  item       Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  capturedAt DateTime @default(now())
+  price      Decimal  @db.Decimal(12, 2)
+  /// Source-specific stats captured with the price (avg90, median90, rank…).
+  stats      Json     @default("{}")
+
+  @@index([itemId, capturedAt])
+}
+
+/// Small persisted key/value state per source so workers resume after restarts
+/// (search rotations, last-seen timestamps, response cache validators).
+model WorkerCheckpoint {
+  id        String    @id @default(cuid())
+  sourceKey SourceKey
+  key       String
+  value     Json
+  updatedAt DateTime  @updatedAt
+
+  @@unique([sourceKey, key])
 }
 
 /// Canonical product record as observed on a source.
@@ -94,17 +136,23 @@ model Item {
   currency      String   @default("USD")
   /// Set for local-pickup items (estate sales, FB-alternative local listings).
   location      String?
+  /// Auction end time, when the listing is an auction.
+  endsAt        DateTime?
+  /// Current number of bids, for auction listings.
+  bidsCount     Int?
   firstSeenAt   DateTime @default(now())
   lastCheckedAt DateTime @default(now())
   /// Raw source payload for reprocessing/debugging.
   raw           Json     @default("{}")
 
-  valuations Valuation[]
-  deals      Deal[]
+  valuations     Valuation[]
+  deals          Deal[]
+  priceSnapshots PriceSnapshot[]
 
   @@unique([sourceId, externalId])
   @@index([category])
   @@index([lastCheckedAt])
+  @@index([endsAt])
 }
 
 // ---------------------------------------------------------------------------

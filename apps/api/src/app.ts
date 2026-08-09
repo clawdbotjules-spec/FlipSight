@@ -17,6 +17,7 @@ import dealRoutes from "./routes/deals.js";
 import healthRoutes from "./routes/health.js";
 import ledgerRoutes from "./routes/ledger.js";
 import ruleRoutes from "./routes/rules.js";
+import searchRoutes from "./routes/searches.js";
 import wsRoutes from "./routes/ws.js";
 import type { AppConfig } from "./config.js";
 
@@ -124,6 +125,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   await app.register(ruleRoutes, { prefix: "/rules" });
   await app.register(dealRoutes, { prefix: "/deals" });
   await app.register(ledgerRoutes, { prefix: "/ledger" });
+  await app.register(searchRoutes, { prefix: "/searches" });
 
   await fanout.start();
 

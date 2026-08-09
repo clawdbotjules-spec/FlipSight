@@ -4,3 +4,7 @@ export * from "./matching.js";
 export * from "./economics.js";
 export * from "./password.js";
 export * from "./env.js";
+export * from "./misspellings.js";
+export * from "./stats.js";
+export * from "./source-config.js";
+export * from "./deal-payload.js";

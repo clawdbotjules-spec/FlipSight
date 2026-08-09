@@ -1,0 +1,27 @@
+{
+  "name": "@flipsight/worker-estate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Estate-sale lead worker: polls EstateSales.net pages and RSS feeds (HiBid) around the home ZIP, extracts brands/categories/worth-attending via the Anthropic API, stores estate_lead Items.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@flipsight/db": "*",
+    "@flipsight/shared": "*",
+    "@flipsight/worker-core": "*",
+    "fast-xml-parser": "^5.10.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.11",
+    "typescript": "^7.0.2"
+  }
+}

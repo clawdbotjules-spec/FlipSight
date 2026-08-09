@@ -1,12 +1,24 @@
-# FlipSight — Phase 1 stack: postgres + redis + api.
+# FlipSight — postgres + redis + api + five source workers.
 #
 # Copy .env.example to .env first (defaults work out of the box for local dev):
 #   cp .env.example .env
 #   docker compose up --build
 #
-# Later phases add the commented services below (web, per-source workers,
-# caddy). Every service gets a healthcheck and `restart: unless-stopped` —
-# no cron hacks, long-running processes with graceful recovery.
+# Every service has a healthcheck and `restart: unless-stopped` — no cron
+# hacks; long-running workers with graceful recovery. The api service applies
+# migrations on boot; workers wait for it to be healthy.
+
+x-worker-env: &worker-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-flipsight}:${POSTGRES_PASSWORD:-flipsight}@postgres:5432/${POSTGRES_DB:-flipsight}
+  REDIS_URL: redis://redis:6379
+  HEALTH_PORT: 8080
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+x-worker-depends: &worker-depends
+  postgres: { condition: service_healthy }
+  redis: { condition: service_healthy }
+  api: { condition: service_healthy }
 
 services:
   postgres:
@@ -74,7 +86,87 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Phase 2+ services — uncomment as they land.
+  # Source workers — long-running BullMQ processes, one per source. The api
+  # service owns migrations, so workers wait for it to be healthy.
+  # ---------------------------------------------------------------------------
+
+  worker-ebay:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-ebay }
+    environment:
+      <<: *worker-env
+      EBAY_CLIENT_ID: ${EBAY_CLIENT_ID:-}
+      EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET:-}
+    depends_on: *worker-depends
+    healthcheck: &worker-healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  worker-keepa:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-keepa }
+    environment:
+      <<: *worker-env
+      KEEPA_API_KEY: ${KEEPA_API_KEY:-}
+    depends_on: *worker-depends
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+
+  worker-goodwill:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-goodwill }
+    environment:
+      <<: *worker-env
+    depends_on: *worker-depends
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+
+  worker-retail:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-retail }
+    environment:
+      <<: *worker-env
+      HOME_ZIP: ${HOME_ZIP:-32114}
+      TARGET_API_KEY: ${TARGET_API_KEY:-}
+      WALMART_CONSUMER_ID: ${WALMART_CONSUMER_ID:-}
+      WALMART_PRIVATE_KEY: ${WALMART_PRIVATE_KEY:-}
+      WALMART_KEY_VERSION: ${WALMART_KEY_VERSION:-1}
+    depends_on: *worker-depends
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+
+  worker-estate:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args: { WORKER: worker-estate }
+    environment:
+      <<: *worker-env
+      HOME_ZIP: ${HOME_ZIP:-32114}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5}
+    depends_on: *worker-depends
+    healthcheck: *worker-healthcheck
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Phase 3+ services — uncomment as they land.
   # ---------------------------------------------------------------------------
 
   # web:
@@ -88,29 +180,7 @@ services:
   #   depends_on:
   #     api:
   #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
   #   restart: unless-stopped
-
-  # worker-ebay:
-  #   build: { context: ., dockerfile: apps/worker-ebay/Dockerfile }
-  #   environment:
-  #     DATABASE_URL: postgresql://${POSTGRES_USER:-flipsight}:${POSTGRES_PASSWORD:-flipsight}@postgres:5432/${POSTGRES_DB:-flipsight}
-  #     REDIS_URL: redis://redis:6379
-  #     EBAY_CLIENT_ID: ${EBAY_CLIENT_ID}
-  #     EBAY_CLIENT_SECRET: ${EBAY_CLIENT_SECRET}
-  #   depends_on:
-  #     postgres: { condition: service_healthy }
-  #     redis: { condition: service_healthy }
-  #   restart: unless-stopped
-
-  # worker-keepa:     # Keepa/Amazon valuations   (KEEPA_API_KEY)
-  # worker-retail:    # Walmart + Target clearance
-  # worker-goodwill:  # ShopGoodwill auctions
-  # worker-estate:    # EstateSales.net + AI parsing (ANTHROPIC_API_KEY)
 
   # caddy:
   #   image: caddy:2-alpine

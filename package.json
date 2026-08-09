@@ -12,7 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build -w @flipsight/shared && npm run build -w @flipsight/db && npm run build -w @flipsight/api",
+    "build": "npm run build -w @flipsight/shared && npm run build -w @flipsight/db && npm run build -w @flipsight/worker-core && npm run build -w @flipsight/api && npm run build -w @flipsight/worker-ebay && npm run build -w @flipsight/worker-keepa && npm run build -w @flipsight/worker-goodwill && npm run build -w @flipsight/worker-retail && npm run build -w @flipsight/worker-estate",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w @flipsight/shared",
     "dev:api": "npm run dev -w @flipsight/api",
