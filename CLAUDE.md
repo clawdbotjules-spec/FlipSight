@@ -1,9 +1,9 @@
 # FlipSight — agent notes
 
 Real-time marketplace arbitrage engine. Phase 1 (data model + API +
-realtime), Phase 2 (five source workers), and Phase 3 (valuation engine +
-Discord/Pushover alerts + AI listing assistant) are complete; see README.md
-for the product/API overview.
+realtime), Phase 2 (five source workers), Phase 3 (valuation engine +
+Discord/Pushover alerts + AI listing assistant), and Phase 4 (Next.js
+mission-control UI) are complete; see README.md for the product/API overview.
 
 ## Commands
 
@@ -18,7 +18,10 @@ npm run seed:deal          # inject pre-valued demo deal + publish deals:new
 npm run seed:item          # inject underpriced Item + enqueue valuate job (phase-3 demo)
 npm run dev:api            # tsx watch with pretty logs
 npm run smoke              # E2E acceptance vs running stack (phases 1+3; SMOKE_PHASE3=0 to skip 3)
-docker compose up --build  # postgres + redis + api + 6 workers
+npm run dev -w @flipsight/web    # web UI dev server on :3000
+npm run build -w @flipsight/web  # Next build (NOT part of root `build` — keep it that way,
+                                 # docker/worker.Dockerfile runs the root build)
+docker compose up --build  # postgres + redis + api + web + 6 workers
 # Run one worker on the host:  HEALTH_PORT=8103 node apps/worker-goodwill/dist/index.js
 ```
 
@@ -94,6 +97,23 @@ docker compose up --build  # postgres + redis + api + 6 workers
 - Auth endpoints have a stricter rate limit (20/min); `/health` and `/ws`
   are exempt; `POST /assistant/listing` is 5/min and is a deliberate
   long-call exception to the <100 ms rule (user-invoked AI tool).
+- **Web app (`apps/web`)**: Next 15 App Router + Tailwind 4 + its own
+  TypeScript 5 pin (root TS 7 doesn't drive Next builds). NOT in the root
+  build chain. Conventions:
+  - Custom CSS classes (`.glass`, `.field`, `.btn`, …) MUST live inside
+    `@layer components` in `globals.css` — unlayered rules silently beat
+    Tailwind utilities (this bug broke `sticky` and width overrides once).
+  - `src/lib/types.ts` mirrors the API DTO contracts by hand — no runtime
+    import of `@flipsight/shared` (it would drag node builtins into the
+    client bundle). Update both sides together.
+  - The feed's first `/deals` request is fired by an inline `<head>` script
+    (see layout.tsx) and adopted by react-query — keep its query string in
+    sync with the feed's `DEFAULT_FILTERS`.
+  - Feed perf budget: keep `motion`/recharts OUT of the feed route's chunk
+    (score ring is CSS-animated; TickingMoney lives in `ticking.tsx`; the
+    drawer is a `next/dynamic` import). Lighthouse ≥90 is an acceptance bar.
+  - `NEXT_PUBLIC_API_URL` bakes at build time; compose passes `APP_API_URL`
+    (browser-visible URL, not the docker-internal hostname).
 - Anthropic calls use `messages.parse` + `zodOutputFormat` structured
   outputs (`@anthropic-ai/sdk`), model from `ANTHROPIC_MODEL` (default
   `claude-sonnet-5`); always handle `stop_reason === "refusal"` and null

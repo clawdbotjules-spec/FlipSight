@@ -1,0 +1,243 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   FlipSight mission-control design tokens — dark only.
+   Near-black base, glass panels, one restrained neon palette:
+   cyan (primary) · violet (secondary) · amber (warnings) · green (profit).
+--------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", monospace;
+
+  --color-bg: #0a0e14;
+  --color-panel: #0e141f;
+  --color-raise: #131b29;
+  --color-ink: #e6edf3;
+  --color-muted: #8b98a9;
+  --color-faint: #566173;
+  --color-line: rgba(148, 163, 184, 0.1);
+
+  --color-acc: #22d3ee; /* cyan — primary accent */
+  --color-acc2: #a78bfa; /* violet — secondary accent */
+  --color-warn: #fbbf24; /* amber — warnings / risk */
+  --color-profit: #34d399; /* green — money going the right way */
+  --color-loss: #fb7185; /* rose — losses / errors */
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* Fixed backdrop: faint blueprint grid + top aurora + film grain. Painted on
+   a pseudo-element (no extra DOM, no canvas) so it never re-renders. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(120% 60% at 50% -12%, rgba(34, 211, 238, 0.07), transparent 60%),
+    radial-gradient(80% 50% at 90% 110%, rgba(167, 139, 250, 0.05), transparent 60%),
+    linear-gradient(rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    44px 44px,
+    44px 44px;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@layer components {
+  /* --- Glass panels ---------------------------------------------------------- */
+
+  .glass {
+    position: relative;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.016) 55%);
+    border: 1px solid rgba(148, 163, 184, 0.11);
+    border-radius: 0.75rem;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  /* 1px gradient edge (cyan → violet) masked to the border ring only. */
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(34, 211, 238, 0.28), rgba(167, 139, 250, 0.14) 45%, transparent 75%);
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .glass-flat::before {
+    display: none;
+  }
+
+  /* --- Numerals -------------------------------------------------------------- */
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* --- New-deal arrival pulse ------------------------------------------------ */
+
+@keyframes deal-glow {
+  0% {
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0.55),
+      0 0 26px 2px rgba(34, 211, 238, 0.3);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(34, 211, 238, 0),
+      0 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+.deal-glow {
+  animation: deal-glow 1.8s ease-out 1;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 2.2s ease-in-out infinite;
+}
+
+/* --- Scrollbars (WebKit + Firefox) ---------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  /* --- Small form controls --------------------------------------------------- */
+
+  .field {
+    @apply w-full rounded-md border border-line bg-raise/70 px-3 py-2 text-sm text-ink placeholder:text-faint outline-none transition-colors;
+  }
+  .field:focus {
+    border-color: rgba(34, 211, 238, 0.45);
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+  }
+
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-line bg-raise/80 px-3 py-1.5 text-sm font-medium text-ink transition-all select-none;
+  }
+  .btn:hover {
+    border-color: rgba(148, 163, 184, 0.3);
+    background: rgba(30, 41, 59, 0.8);
+  }
+  .btn:active {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+  .btn-acc {
+    @apply border-transparent bg-acc/15 text-acc;
+    border-color: rgba(34, 211, 238, 0.35);
+  }
+  .btn-acc:hover {
+    background: rgba(34, 211, 238, 0.22);
+    border-color: rgba(34, 211, 238, 0.6);
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent text-muted;
+  }
+  .btn-ghost:hover {
+    background: rgba(148, 163, 184, 0.08);
+    border-color: transparent;
+    color: var(--color-ink);
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raise/60 px-2 py-0.5 text-[11px] font-medium text-muted;
+  }
+
+  .label {
+    @apply mb-1 block text-[11px] font-semibold tracking-wider text-faint uppercase;
+  }
+
+  /* Toggle switch */
+  .switch {
+    @apply relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-line bg-raise transition-colors;
+  }
+  .switch[data-on="true"] {
+    background: rgba(34, 211, 238, 0.25);
+    border-color: rgba(34, 211, 238, 0.5);
+  }
+  .switch::after {
+    content: "";
+    @apply absolute left-0.5 h-3.5 w-3.5 rounded-full bg-muted transition-transform;
+  }
+  .switch[data-on="true"]::after {
+    transform: translateX(16px);
+    background: var(--color-acc);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deal-glow,
+  .pulse-dot {
+    animation: none;
+  }
+}

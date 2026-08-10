@@ -1,5 +1,5 @@
-import { DEAL_STATUSES } from "@flipsight/shared";
-import type { Prisma } from "@flipsight/db";
+import { DEAL_STATUSES, SOURCE_KEYS } from "@flipsight/shared";
+import { decN, type Prisma } from "@flipsight/db";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -13,6 +13,9 @@ const DealsQuery = z.object({
   minScore: z.coerce.number().int().min(0).max(100).optional(),
   status: z.enum(DEAL_STATUSES).optional(),
   category: z.string().min(1).max(80).optional(),
+  source: z.enum(SOURCE_KEYS).optional(),
+  /** Only items with a pickup location (estate sales, local listings). */
+  localOnly: z.coerce.boolean().optional(),
   /** Free-text search over the item title. */
   q: z.string().min(1).max(200).optional(),
 });
@@ -29,8 +32,10 @@ export default async function dealRoutes(app: FastifyInstance) {
     const query = req.query;
 
     const itemFilter: Prisma.ItemWhereInput = {};
-    if (query.category) itemFilter.category = { equals: query.category, mode: "insensitive" };
+    if (query.category) itemFilter.category = { contains: query.category, mode: "insensitive" };
     if (query.q) itemFilter.title = { contains: query.q, mode: "insensitive" };
+    if (query.source) itemFilter.source = { key: query.source };
+    if (query.localOnly) itemFilter.location = { not: null };
 
     const where: Prisma.DealWhereInput = {
       // Default view hides dismissed deals; ask for them explicitly.
@@ -75,7 +80,27 @@ export default async function dealRoutes(app: FastifyInstance) {
       include: DEAL_INCLUDE,
     });
     if (!deal) throw errors.notFound("Deal not found");
-    return { deal: toDealDTO(deal) };
+
+    // Chart data for the detail drawer: Keepa/price-history snapshots and, for
+    // demo-comped items, the raw sold prices behind the distribution.
+    const snapshots = await app.prisma.priceSnapshot.findMany({
+      where: { itemId: deal.itemId },
+      orderBy: { capturedAt: "asc" },
+      take: 180,
+    });
+    const raw = (deal.item.raw ?? {}) as Record<string, unknown>;
+    const demo = raw.demoComps as { soldPrices?: number[] } | undefined;
+    const rawComps = Array.isArray(demo?.soldPrices) ? demo.soldPrices.filter((p) => typeof p === "number") : null;
+
+    return {
+      deal: toDealDTO(deal),
+      priceHistory: snapshots.map((s) => ({
+        capturedAt: s.capturedAt.toISOString(),
+        price: decN(s.price),
+        stats: s.stats as Record<string, unknown>,
+      })),
+      rawComps,
+    };
   });
 
   r.post("/:id/claim", { schema: { params: IdParams } }, async (req) => {

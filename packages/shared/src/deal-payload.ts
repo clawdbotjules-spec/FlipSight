@@ -28,6 +28,8 @@ export interface DealPayloadInput {
     currentPrice: number;
     location: string | null;
     sourceKey: SourceKeyName;
+    endsAt?: Date | null;
+    bidsCount?: number | null;
   };
   valuation: {
     id: string;
@@ -55,7 +57,11 @@ export function buildDealAlertPayload(input: DealPayloadInput): DealAlertPayload
       roiPct: input.deal.roiPct,
       score: input.deal.score,
       createdAt: input.deal.createdAt.toISOString(),
-      item: { ...input.item },
+      item: {
+        ...input.item,
+        endsAt: input.item.endsAt ? input.item.endsAt.toISOString() : null,
+        bidsCount: input.item.bidsCount ?? null,
+      },
       valuation: { ...input.valuation },
       ...(input.meta ? { meta: input.meta } : {}),
     },

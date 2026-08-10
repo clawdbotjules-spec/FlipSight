@@ -188,18 +188,25 @@ services:
   # Phase 3+ services — uncomment as they land.
   # ---------------------------------------------------------------------------
 
-  # web:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/web/Dockerfile
-  #   environment:
-  #     NEXT_PUBLIC_API_URL: http://localhost:4000
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # The URL the BROWSER uses to reach the API (baked at build time).
+        NEXT_PUBLIC_API_URL: ${APP_API_URL:-http://localhost:4000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
 
   # caddy:
   #   image: caddy:2-alpine

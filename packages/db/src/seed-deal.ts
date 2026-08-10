@@ -186,6 +186,8 @@ async function main() {
         currentPrice: decN(item.currentPrice),
         location: item.location,
         sourceKey: source.key,
+        endsAt: item.endsAt,
+        bidsCount: item.bidsCount,
       },
       valuation: {
         id: valuation.id,

@@ -1,4 +1,5 @@
-import { ALERT_CHANNELS, RULES_CHANGED_CHANNEL } from "@flipsight/shared";
+import { ALERT_CHANNELS, RULES_CHANGED_CHANNEL, dealMatchesRule } from "@flipsight/shared";
+import { decN } from "@flipsight/db";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -62,6 +63,53 @@ export default async function ruleRoutes(app: FastifyInstance) {
     });
     await broadcastRulesChanged(req.user.sub);
     return reply.status(201).send({ rule: toRuleDTO(rule) });
+  });
+
+  /**
+   * Live rule preview for the editor: "this rule would have matched N deals in
+   * the last 24 h" — runs the exact shared matcher over recent deals without
+   * saving anything.
+   */
+  r.post("/preview", { schema: { body: RuleBody.partial() } }, async (req) => {
+    const since = new Date(Date.now() - 24 * 3600_000);
+    const recent = await app.prisma.deal.findMany({
+      where: { createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 500,
+      include: { item: true },
+    });
+    const rule = {
+      enabled: true,
+      minProfit: req.body.minProfit ?? null,
+      minRoi: req.body.minRoi ?? null,
+      maxBuyPrice: req.body.maxBuyPrice ?? null,
+      categories: req.body.categories ?? [],
+      keywords: req.body.keywords ?? [],
+      excludeKeywords: req.body.excludeKeywords ?? [],
+      localOnly: req.body.localOnly ?? false,
+    };
+    const matched = recent.filter((deal) =>
+      dealMatchesRule(
+        {
+          buyPrice: decN(deal.buyPrice),
+          netProfit: decN(deal.netProfit),
+          roiPct: deal.roiPct,
+          item: { title: deal.item.title, category: deal.item.category, location: deal.item.location },
+        },
+        rule,
+      ),
+    );
+    return {
+      since: since.toISOString(),
+      sampled: recent.length,
+      matched: matched.length,
+      examples: matched.slice(0, 5).map((d) => ({
+        id: d.id,
+        title: d.item.title,
+        netProfit: decN(d.netProfit),
+        score: d.score,
+      })),
+    };
   });
 
   r.get("/:id", { schema: { params: IdParams } }, async (req) => {

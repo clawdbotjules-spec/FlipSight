@@ -75,6 +75,8 @@ export function toDealDTO(deal: DealWithRelations) {
       currency: deal.item.currency,
       location: deal.item.location,
       sourceKey: deal.item.source.key,
+      endsAt: deal.item.endsAt ? deal.item.endsAt.toISOString() : null,
+      bidsCount: deal.item.bidsCount,
       firstSeenAt: deal.item.firstSeenAt.toISOString(),
     },
     valuation: {
@@ -87,6 +89,9 @@ export function toDealDTO(deal: DealWithRelations) {
       compSource: deal.valuation.compSource,
       computedAt: deal.valuation.computedAt.toISOString(),
     },
+    // Engine breakdown (fees/shipping/score/risk flags) — null-ish for
+    // pre-engine seed deals.
+    meta: (deal.meta ?? {}) as Record<string, unknown>,
   };
 }
 

@@ -86,8 +86,43 @@ assistant: complete.**
       → Deal with sane, self-consistent math in **0.9–1.1 s** end-to-end,
       Discord webhook received the embed, WebSocket pushed in 2 ms
 
-Phase 4+: the Next.js web UI and the `caddy` edge (slots reserved in
-`docker-compose.yml`).
+**Phase 4 — the mission-control web UI: complete.**
+
+- [x] `apps/web` — Next.js 15 + Tailwind 4, dark trading-terminal aesthetic:
+      near-black base with a faint blueprint grid + film grain, glassmorphic
+      panels with 1px cyan→violet gradient edges, one restrained neon palette
+      (cyan primary · violet secondary · amber warnings · green profit),
+      Geist Mono for every number, Geist Sans for text
+- [x] **Live Deal Feed** — WebSocket-driven stream: new deals slide in with a
+      glow pulse, animated score rings, buy→resale arrows, live auction
+      countdowns (one shared 1 Hz clock), risk-flag chips, Open / Claim /
+      Dismiss / Draft-my-listing actions, filter bar (search, source,
+      category, min-score slider, local-only) — **window-virtualized so
+      1,000+ deals scroll at 60 fps**
+- [x] **Deal Detail drawer** — sold-comp distribution histogram + price
+      history (Recharts, lazy-loaded so the feed chunk stays lean), the full
+      fee/shipping/net economics table, score-anatomy bars, risk flags, and
+      the engine's reasoning in plain sentences
+- [x] **P&L dashboard** — today/week/month/all-time realized profit with
+      ticking counters, cumulative profit area chart, ROI by source and
+      category, active inventory with days-held, average days-to-sell
+- [x] **Sources & Rules** — per-source enable toggles + live ingest stats,
+      keyword/brand-seed editing, zod-validated config JSON, and an alert-rule
+      editor with a live preview ("would have matched N deals in the last
+      24 h") powered by the exact server-side matcher
+- [x] **Listing Assistant** — photo dropzone → Claude-drafted listing with
+      80-char title counter, item specifics, honest description, comp-based
+      price suggestion, one-click copy buttons
+- [x] **System Status** — per-worker cards with 24 h ingest sparklines, queue
+      depths, engine throughput, alert delivery counts, dead-letter table
+      (5 s polling against a server-cached aggregate)
+- [x] Acceptance verified against the full 10-service Docker stack:
+      **Lighthouse performance 93–97 / accessibility 100** on the feed,
+      seeded deal → rendered card in **2–5 ms** publish→client (measured in
+      the UI's own latency badge), mobile layouts with zero horizontal
+      overflow, 16/16 Playwright checks green
+
+Phase 5+: the `caddy` HTTPS edge (slot reserved in `docker-compose.yml`).
 
 ## Architecture
 
@@ -102,13 +137,13 @@ Phase 4+: the Next.js web UI and the `caddy` edge (slots reserved in
                                                └──┬───────────┬───────────────┘
                                      Redis pub/sub│           │ Discord webhook
                                                   ▼           ▼ + Pushover
- ┌──────────┐  SQL   ┌───────────────────────────────┐  WebSocket   ┌────────┐
- │ Postgres │ ◀────▶ │ api (Fastify)                 │ ───────────▶ │ web /  │
- │ 16       │        │ REST + JWT + rate limiting    │  deal.new    │ clients│
- └──────────┘        │ DealFanout: match alert rules │ < 1s budget  └────────┘
-                     │ per connected user            │
-                     │ /settings · /assistant/listing│
-                     └───────────────────────────────┘
+ ┌──────────┐  SQL   ┌───────────────────────────────┐  WebSocket   ┌─────────────┐
+ │ Postgres │ ◀────▶ │ api (Fastify)                 │ ───────────▶ │ web         │
+ │ 16       │        │ REST + JWT + rate limiting    │  deal.new    │ Next.js 15  │
+ └──────────┘        │ DealFanout: match alert rules │ < 1s budget  │ live feed · │
+                     │ per connected user            │              │ P&L · rules │
+                     │ /settings · /assistant/listing│              │ · assistant │
+                     └───────────────────────────────┘              └─────────────┘
 ```
 
 Each worker is an isolated BullMQ process: repeatable schedules persisted in
@@ -145,8 +180,9 @@ to hard-disable those fetches instead.
 
 ```bash
 cp .env.example .env         # defaults work for local dev; set JWT_SECRET
-docker compose up --build -d # postgres + redis + api + 6 workers, migrations on boot
-docker compose ps            # wait for all nine to report healthy
+docker compose up --build -d # postgres + redis + api + web + 6 workers, migrations on boot
+docker compose ps            # wait for all ten to report healthy
+# open http://localhost:3000 — log in as demo@flipsight.dev / flipsight-demo
 
 # seed sources + demo user (demo@flipsight.dev / flipsight-demo) + default rule
 docker compose exec api node packages/db/dist/seed.js
@@ -188,6 +224,28 @@ npm run smoke                  # SMOKE_PHASE3=0 to run only the phase-1 part
 # [smoke] ACCEPTANCE PASS — phase 1 alert 5ms; phase 3 pipeline 0.9s, publish->ws 2ms (budget 1000ms)
 ```
 
+## Web UI
+
+`http://localhost:3000` — dark-only mission control (log in with the seeded
+demo user). Built with Next.js 15, Tailwind 4, native WebSocket, TanStack
+Query + Virtual, Recharts (lazy-loaded off the feed path), and Geist.
+
+- **Live Feed** (`/`) — realtime deal stream; the topbar badge shows the live
+  publish→client latency of the last alert (measured 2–5 ms). The list is
+  window-virtualized; new arrivals prepend with a glow pulse and animated
+  score ring. An inline `<head>` script starts the first `/deals` fetch while
+  the JS bundles are still downloading.
+- **Deal drawer** — click any card: comp histogram, price history, fee &
+  shipping breakdown, score anatomy, engine reasoning, claim/dismiss/draft.
+- **P&L** (`/pnl`), **Sources & Rules** (`/sources`), **Assistant**
+  (`/assistant`), **System** (`/status`).
+- Performance: Lighthouse **93–97 performance / 100 accessibility** on the
+  authenticated feed (feed route ships ~134 kB gz first-load; charts and the
+  drawer live in lazy chunks). Fully responsive — bottom tab bar on mobile.
+- `NEXT_PUBLIC_API_URL` is baked at build time (compose passes
+  `APP_API_URL`, defaulting to `http://localhost:4000` — the URL the
+  *browser* uses to reach the API).
+
 ## Local development (no Docker for the API)
 
 ```bash
@@ -205,7 +263,9 @@ Useful scripts (repo root):
 
 | Script              | What it does                                        |
 | ------------------- | --------------------------------------------------- |
-| `npm run build`     | Compile all workspaces in dependency order          |
+| `npm run build`     | Compile backend workspaces in dependency order      |
+| `npm run build -w @flipsight/web` | Production Next.js build (standalone output) |
+| `npm run dev -w @flipsight/web` | Web UI dev server on :3000              |
 | `npm test`          | Unit tests (rule matching, economics, fees/shipping, scoring, comp stats) |
 | `npm run db:migrate`| Create/apply migrations against `DATABASE_URL`      |
 | `npm run db:seed`   | Sources + demo user + default alert rule + app settings (idempotent) |
@@ -366,6 +426,8 @@ schedulers resume, prior completed jobs intact.
 ## Repository layout
 
 ```
+apps/web/             Next.js 15 mission-control UI: live feed, deal drawer,
+                      P&L, sources & rules, listing assistant, system status
 apps/api/             Fastify API + WebSocket fan-out + settings + listing
                       assistant (Dockerfile here)
 apps/worker-ebay/     eBay Browse sweeps (keywords + misspellings, ending-soon,
@@ -386,6 +448,6 @@ packages/clients/     Marketplace/AI clients shared by workers and the API:
                       assistant
 docker/               worker.Dockerfile (shared by all six workers)
 scripts/              smoke.mjs (acceptance), listen.mjs (live deal watcher)
-caddy/Caddyfile       Edge config for the later web + HTTPS phase
-docker-compose.yml    postgres + redis + api + 6 workers (slots for web/caddy)
+caddy/Caddyfile       Edge config for the later HTTPS phase
+docker-compose.yml    postgres + redis + api + web + 6 workers (slot for caddy)
 ```

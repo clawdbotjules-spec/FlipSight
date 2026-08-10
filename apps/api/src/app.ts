@@ -22,6 +22,8 @@ import ledgerRoutes from "./routes/ledger.js";
 import ruleRoutes from "./routes/rules.js";
 import searchRoutes from "./routes/searches.js";
 import settingsRoutes from "./routes/settings.js";
+import sourceRoutes from "./routes/sources.js";
+import statusRoutes from "./routes/status.js";
 import wsRoutes from "./routes/ws.js";
 import type { AppConfig } from "./config.js";
 
@@ -131,6 +133,8 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   await app.register(ledgerRoutes, { prefix: "/ledger" });
   await app.register(searchRoutes, { prefix: "/searches" });
   await app.register(settingsRoutes, { prefix: "/settings" });
+  await app.register(sourceRoutes, { prefix: "/sources" });
+  await app.register(statusRoutes, { prefix: "/status" });
 
   const ebay = new EbayClient({
     clientId: process.env.EBAY_CLIENT_ID,

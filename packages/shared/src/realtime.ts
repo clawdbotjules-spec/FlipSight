@@ -30,6 +30,9 @@ export const DealAlertPayloadSchema = z.object({
       currentPrice: z.number(),
       location: z.string().nullable(),
       sourceKey: z.enum(SOURCE_KEYS),
+      /** ISO auction end time — lets the UI show live countdowns. */
+      endsAt: z.string().nullable().optional(),
+      bidsCount: z.number().nullable().optional(),
     }),
     valuation: z.object({
       id: z.string(),

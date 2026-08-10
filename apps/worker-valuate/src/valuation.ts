@@ -197,6 +197,8 @@ export function makeValuateProcessor(deps: ValuatorDeps) {
         currentPrice: buyPrice,
         location: item.location,
         sourceKey: item.source.key as SourceKeyName,
+        endsAt: item.endsAt,
+        bidsCount: item.bidsCount,
       },
       valuation: {
         id: valuation.id,

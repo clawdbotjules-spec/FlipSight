@@ -140,6 +140,106 @@ export default async function ledgerRoutes(app: FastifyInstance) {
     return { entry: toLedgerDTO(entry) };
   });
 
+  /**
+   * P&L dashboard payload: realized profit by period, a cumulative daily
+   * series, ROI grouped by source and category, the unsold inventory, and
+   * average days-to-sell — one round trip for the whole screen.
+   */
+  r.get("/analytics", async (req) => {
+    const now = Date.now();
+    const entries = await app.prisma.flipLedger.findMany({
+      where: { userId: req.user.sub },
+      orderBy: { purchasedAt: "asc" },
+      take: 2000,
+      include: { deal: { include: { item: { include: { source: true } }, valuation: true } } },
+    });
+
+    const sold = entries.filter((e) => e.soldAt != null && e.realizedProfit != null);
+    const dayMs = 24 * 3600_000;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const profitSince = (since: number) =>
+      round2(
+        sold
+          .filter((e) => e.soldAt!.getTime() >= since)
+          .reduce((sum, e) => sum + decN(e.realizedProfit!), 0),
+      );
+
+    // Cumulative realized profit, one point per day with activity (90d window).
+    const byDay = new Map<string, number>();
+    for (const e of sold) {
+      if (e.soldAt!.getTime() < now - 90 * dayMs) continue;
+      const day = e.soldAt!.toISOString().slice(0, 10);
+      byDay.set(day, (byDay.get(day) ?? 0) + decN(e.realizedProfit!));
+    }
+    let running = 0;
+    const cumulative = [...byDay.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([day, profit]) => {
+        running = round2(running + profit);
+        return { day, profit: round2(profit), cumulative: running };
+      });
+
+    const groupRoi = (label: (e: (typeof sold)[number]) => string) => {
+      const groups = new Map<string, { profit: number; cost: number; count: number }>();
+      for (const e of sold) {
+        const key = label(e);
+        const g = groups.get(key) ?? { profit: 0, cost: 0, count: 0 };
+        g.profit += decN(e.realizedProfit!);
+        g.cost += decN(e.purchasePrice);
+        g.count += 1;
+        groups.set(key, g);
+      }
+      return [...groups.entries()]
+        .map(([name, g]) => ({
+          name,
+          profit: round2(g.profit),
+          roiPct: g.cost > 0 ? round2((g.profit / g.cost) * 100) : 0,
+          flips: g.count,
+        }))
+        .sort((a, b) => b.profit - a.profit);
+    };
+
+    const daysToSell = sold.map((e) => (e.soldAt!.getTime() - e.purchasedAt.getTime()) / dayMs);
+    const inventory = entries
+      .filter((e) => e.soldAt == null)
+      .map((e) => ({
+        id: e.id,
+        dealId: e.dealId,
+        title: e.deal.item.title,
+        sourceKey: e.deal.item.source.key,
+        category: e.deal.item.category,
+        purchasePrice: decN(e.purchasePrice),
+        purchasedAt: e.purchasedAt.toISOString(),
+        daysHeld: Math.floor((now - e.purchasedAt.getTime()) / dayMs),
+        estimatedResale: decN(e.deal.valuation.estimatedResale),
+        imageUrl: e.deal.item.imageUrls[0] ?? null,
+      }))
+      .sort((a, b) => b.daysHeld - a.daysHeld);
+
+    return {
+      analytics: {
+        realized: {
+          today: profitSince(startOfToday.getTime()),
+          week: profitSince(now - 7 * dayMs),
+          month: profitSince(now - 30 * dayMs),
+          allTime: round2(sold.reduce((sum, e) => sum + decN(e.realizedProfit!), 0)),
+        },
+        cumulative,
+        roiBySource: groupRoi((e) => e.deal.item.source.key),
+        roiByCategory: groupRoi((e) => e.deal.item.category ?? "Uncategorized"),
+        inventory,
+        avgDaysToSell:
+          daysToSell.length > 0
+            ? round2(daysToSell.reduce((a, b) => a + b, 0) / daysToSell.length)
+            : null,
+        soldCount: sold.length,
+        activeCount: inventory.length,
+        activeCostBasis: round2(inventory.reduce((sum, i) => sum + i.purchasePrice, 0)),
+      },
+    };
+  });
+
   r.get("/summary", async (req) => {
     const userId = req.user.sub;
     const [all, sold] = await Promise.all([
