@@ -27,6 +27,9 @@ RUN npm ci
 
 COPY packages ./packages
 COPY apps ./apps
+# Windows checkouts can arrive with CRLF line endings, which break sh scripts
+# in Linux containers — normalize the entrypoint regardless of the host.
+RUN sed -i 's/\r$//' apps/api/docker-entrypoint.sh
 RUN npx prisma generate --schema packages/db/prisma/schema.prisma
 RUN npm run build -w @flipsight/shared \
   && npm run build -w @flipsight/db \
