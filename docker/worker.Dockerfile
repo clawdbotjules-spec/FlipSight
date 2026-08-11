@@ -16,6 +16,7 @@ COPY apps/worker-goodwill/package.json apps/worker-goodwill/package.json
 COPY apps/worker-retail/package.json apps/worker-retail/package.json
 COPY apps/worker-estate/package.json apps/worker-estate/package.json
 COPY apps/worker-valuate/package.json apps/worker-valuate/package.json
+COPY apps/watchdog/package.json apps/watchdog/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/worker-core/package.json packages/worker-core/package.json

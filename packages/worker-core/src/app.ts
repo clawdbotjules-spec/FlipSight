@@ -281,14 +281,41 @@ export class WorkerApp {
     Object.assign(this.healthExtra, fields);
   }
 
+  /**
+   * True once SIGTERM/SIGINT arrived. Long multi-page sweep jobs check this
+   * between pages and return early with partial totals, so `docker stop`
+   * finishes the current page instead of racing the kill timeout.
+   */
+  get isClosing(): boolean {
+    return this.closing;
+  }
+
   async shutdown(signal: string): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    this.log.info({ signal }, "shutting down gracefully");
-    const force = setTimeout(() => process.exit(1), 15_000);
+    this.log.info({ signal }, "shutting down gracefully — waiting for in-flight jobs");
+    // Absolute ceiling: must stay under docker's stop_grace_period (45 s in
+    // compose) so we exit on our own terms instead of being SIGKILLed.
+    const forceMs = Number(process.env.SHUTDOWN_FORCE_MS ?? 40_000);
+    const force = setTimeout(() => {
+      this.log.error("shutdown ceiling hit — exiting; unfinished jobs will be retried");
+      process.exit(1);
+    }, forceMs);
     force.unref();
     try {
-      await Promise.allSettled(this.workers.map((w) => w.close()));
+      // Graceful close waits for active jobs. If they don't finish inside the
+      // soft budget, force-close: BullMQ marks them stalled and they re-run
+      // after restart (all jobs are idempotent upserts), so nothing is lost.
+      const graceful = Promise.allSettled(this.workers.map((w) => w.close()));
+      const softMs = Math.max(5_000, forceMs - 10_000);
+      const timedOut = await Promise.race([
+        graceful.then(() => false),
+        new Promise<true>((resolve) => setTimeout(resolve, softMs, true).unref()),
+      ]);
+      if (timedOut) {
+        this.log.warn({ softMs }, "in-flight jobs exceeded shutdown budget — force-closing (they will retry)");
+        await Promise.allSettled(this.workers.map((w) => w.close(true)));
+      }
       await Promise.allSettled([...this.queues.values()].map((q) => q.close()));
       await this.dlq.close().catch(() => undefined);
       this.healthServer?.close();

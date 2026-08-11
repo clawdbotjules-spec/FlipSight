@@ -2,7 +2,7 @@
   "name": "flipsight",
   "version": "0.1.0",
   "private": true,
-  "description": "Real-time marketplace arbitrage engine — monitors marketplaces and clearance feeds, values items against sold-price data, and pushes instant deal alerts.",
+  "description": "Real-time marketplace arbitrage engine \u2014 monitors marketplaces and clearance feeds, values items against sold-price data, and pushes instant deal alerts.",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -12,7 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build -w @flipsight/shared && npm run build -w @flipsight/db && npm run build -w @flipsight/worker-core && npm run build -w @flipsight/clients && npm run build -w @flipsight/api && npm run build -w @flipsight/worker-ebay && npm run build -w @flipsight/worker-keepa && npm run build -w @flipsight/worker-goodwill && npm run build -w @flipsight/worker-retail && npm run build -w @flipsight/worker-estate && npm run build -w @flipsight/worker-valuate",
+    "build": "npm run build -w @flipsight/shared && npm run build -w @flipsight/db && npm run build -w @flipsight/worker-core && npm run build -w @flipsight/clients && npm run build -w @flipsight/api && npm run build -w @flipsight/worker-ebay && npm run build -w @flipsight/worker-keepa && npm run build -w @flipsight/worker-goodwill && npm run build -w @flipsight/worker-retail && npm run build -w @flipsight/worker-estate && npm run build -w @flipsight/worker-valuate && npm run build -w @flipsight/watchdog",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test -w @flipsight/shared",
     "dev:api": "npm run dev -w @flipsight/api",
@@ -23,7 +23,8 @@
     "seed:deal": "tsx packages/db/src/seed-deal.ts",
     "smoke": "node scripts/smoke.mjs",
     "listen": "node scripts/listen.mjs",
-    "seed:item": "tsx packages/db/src/seed-item.ts"
+    "seed:item": "tsx packages/db/src/seed-item.ts",
+    "test:api": "npm run test -w @flipsight/api"
   },
   "devDependencies": {
     "tsx": "^4.23.11",

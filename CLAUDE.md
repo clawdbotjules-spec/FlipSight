@@ -1,9 +1,10 @@
 # FlipSight — agent notes
 
-Real-time marketplace arbitrage engine. Phase 1 (data model + API +
-realtime), Phase 2 (five source workers), Phase 3 (valuation engine +
-Discord/Pushover alerts + AI listing assistant), and Phase 4 (Next.js
-mission-control UI) are complete; see README.md for the product/API overview.
+Real-time marketplace arbitrage engine. Phases 1–5 are complete (data model
++ API + realtime; five source workers; valuation engine + Discord/Pushover
+alerts + AI listing assistant; Next.js mission-control UI; hardening +
+deploy: watchdog, nightly backups, Makefile, runbook). See README.md for the
+product/API overview and docs/RUNBOOK.md for ops.
 
 ## Commands
 
@@ -52,7 +53,17 @@ docker compose up --build  # postgres + redis + api + web + 6 workers
 - Heavy work never runs in request handlers (p95 API target <100 ms);
   workers are separate processes (phase 2+, BullMQ on Redis).
 - Every service exposes `/health` and runs under `restart: unless-stopped`
-  with a Docker healthcheck.
+  with a Docker healthcheck. The `watchdog` service pings them all and posts
+  Discord outage/recovery alerts — add new services to its default target
+  list (`apps/watchdog/src/index.ts`).
+- **Shutdown contract**: SIGTERM → BullMQ workers drain in-flight jobs, then
+  force-close at `SHUTDOWN_FORCE_MS` (40 s) — always below the compose
+  `stop_grace_period` (45 s) so exits are ours, not SIGKILL's. Long sweep
+  loops must check `app.isClosing` between pages/searches. All jobs must
+  stay idempotent (upserts) because force-closed jobs re-run after restart.
+- `make deploy` is the single-VPS install/update path (preflight refuses the
+  placeholder JWT_SECRET); nightly `pg_dump` runs in the `backup` sidecar
+  writing to ./backups (bind mount, gitignored).
 
 ## Conventions & gotchas
 

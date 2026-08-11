@@ -122,7 +122,31 @@ assistant: complete.**
       the UI's own latency badge), mobile layouts with zero horizontal
       overflow, 16/16 Playwright checks green
 
-Phase 5+: the `caddy` HTTPS edge (slot reserved in `docker-compose.yml`).
+**Phase 5 — hardening + deploy: complete.**
+
+- [x] Graceful SIGTERM everywhere: BullMQ workers finish in-flight jobs
+      (long sweeps yield between pages), force-close inside the compose
+      `stop_grace_period` so shutdown never races a SIGKILL; interrupted
+      jobs re-run after restart (everything is an idempotent upsert)
+- [x] `watchdog` service: pings every `/health` from inside the network,
+      posts a Discord alert when anything is down > 2 min and a recovery
+      notice when it returns — depends on nothing, so it survives what it
+      watches
+- [x] Nightly `pg_dump` backups to the mounted `./backups` volume (custom
+      format, one on boot + daily at `BACKUP_HOUR_UTC`, pruned after
+      `BACKUP_KEEP_DAYS`) + `make backup` / `make restore FILE=…`
+- [x] `make deploy` for a single Ubuntu VPS: preflight (refuses placeholder
+      secrets), build, start with `--wait`, idempotent seed, status —
+      re-run it for every update
+- [x] Tests: valuation math / scoring / rule matching / fees / IQR units
+      (52) + a 10-case API integration suite (auth, rules CRUD +
+      validation + preview, deal feed→claim→409→dismiss, settings
+      round-trip, sources, status)
+- [x] Verified: kill any container → docker restarts it and the system
+      self-heals; docker daemon restart → all services return healthy on
+      their own; runbook for everything else (`docs/RUNBOOK.md`)
+
+Phase 6+: the `caddy` HTTPS edge (slot reserved in `docker-compose.yml`).
 
 ## Architecture
 
@@ -246,6 +270,105 @@ Query + Virtual, Recharts (lazy-loaded off the feed path), and Geist.
   `APP_API_URL`, defaulting to `http://localhost:4000` — the URL the
   *browser* uses to reach the API).
 
+## Deploying to a VPS
+
+One Ubuntu box with Docker is all it takes. From a fresh server:
+
+```bash
+# 1. Docker (skip if preinstalled):  https://docs.docker.com/engine/install/ubuntu/
+curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER  # re-login after
+
+# 2. Get the code
+git clone <your-fork-url> flipsight && cd flipsight
+
+# 3. Configure — make deploy creates .env on first run and stops so you can edit it
+make deploy          # -> "Created .env … EDIT IT FIRST"
+nano .env            # set JWT_SECRET (openssl rand -hex 32) + any API keys you have
+make deploy          # builds, starts all 12 services, waits healthy, seeds
+```
+
+That's the whole install. `make deploy` is idempotent — it's also the update
+command (`make update` = `git pull` + `make deploy`). Useful afterwards:
+
+```bash
+make status      # health of every service
+make logs SERVICE=worker-valuate
+make smoke       # end-to-end acceptance against the running stack
+make backup      # on-demand pg_dump (nightly happens automatically)
+make restore FILE=backups/flipsight-20260810-030000.dump
+```
+
+Every service restarts itself (`restart: unless-stopped`), so a server
+reboot needs no hands — just make sure Docker starts at boot
+(`sudo systemctl enable docker`). The stack listens on `:3000` (web) and
+`:4000` (api); to serve HTTPS on a domain, uncomment the `caddy` service and
+edit `caddy/Caddyfile`. When something misbehaves: [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
+## Getting the API keys
+
+Everything optional degrades gracefully — start with zero keys (ShopGoodwill
+and Target work unauthenticated) and add these as you get them:
+
+- **eBay** (live listings + sold comps — the valuation engine's best data):
+  create a developer account at [developer.ebay.com](https://developer.ebay.com)
+  (free, instant for the standard tier) → *Application Keys* → create a
+  **Production** keyset → copy the **App ID (Client ID)** and **Cert ID
+  (Client Secret)** into `EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET`. The app
+  uses the OAuth client-credentials flow — no user consent steps needed.
+- **Keepa** (Amazon price history): [keepa.com/#!api](https://keepa.com/#!api),
+  buy an API subscription (token-metered), copy the key into
+  `KEEPA_API_KEY`.
+- **Anthropic** (product identification, estate-sale analysis, listing
+  assistant): create a key at
+  [console.anthropic.com](https://console.anthropic.com) → `ANTHROPIC_API_KEY`.
+- **Discord alerts**: in your server — *Server Settings → Integrations →
+  Webhooks → New Webhook*, pick a channel, *Copy Webhook URL* →
+  `DISCORD_WEBHOOK_URL`. The watchdog reuses the same webhook for outage
+  alerts.
+- **Pushover** (phone push): [pushover.net](https://pushover.net) → your
+  **User Key** → `PUSHOVER_USER`; *Create an Application* → its token →
+  `PUSHOVER_TOKEN`.
+
+## Adding a new source
+
+Two sizes, depending on how much machinery the source needs:
+
+**A retailer with a public product API** → add a plugin to the existing
+retail worker. Implement the `RetailPlugin` interface
+(`apps/worker-retail/src/sources/retail/types.ts` — `key`, `isConfigured`,
+`fetchClearance(ctx)`, optional per-store availability) in a new file next to
+`walmart.ts`/`target.ts`, and register it in `RETAIL_PLUGINS`
+(`sources/retail/index.ts`). It inherits sweeps, pacing, upserts, and
+valuation enqueueing for free.
+
+**A whole new marketplace** → a dedicated worker:
+
+1. **Schema**: add the key to the `SourceKey` enum in
+   `packages/db/prisma/schema.prisma` + `SOURCE_KEYS` in
+   `packages/shared/src/constants.ts`; `npm run db:migrate`.
+2. **Config**: a zod schema for its knobs in
+   `packages/shared/src/source-config.ts` (register in
+   `SOURCE_CONFIG_SCHEMAS`), and defaults in `packages/db/src/seed.ts`.
+3. **Worker**: `apps/worker-<name>/` riding `WorkerApp` from
+   `@flipsight/worker-core` — schedule sweeps with `app.scheduleEvery`,
+   fetch through `HttpClient` (token bucket + robots.txt + conditional
+   requests) or pace an official API with `TokenBucket`, then
+   `upsertItem()` + `enqueueValuate()` per listing. Check `app.isClosing`
+   between pages so SIGTERM stays graceful. Copy the shape of
+   `worker-goodwill` (scraper) or `worker-keepa` (API).
+4. **Wire it up**: root `build` script, a service block in
+   `docker-compose.yml` (use `docker/worker.Dockerfile`,
+   `args: {WORKER: worker-<name>}`), a `COPY` line for its `package.json`
+   in the three Dockerfiles, and add it to the watchdog's default targets
+   (`apps/watchdog/src/index.ts`).
+5. **Respect the rules**: official APIs or public endpoints only, check
+   robots.txt, rate-limit with jitter, and never touch sites whose ToS
+   forbids automation.
+
+The valuation engine, alerting, UI feed, and P&L need **zero changes** —
+anything that lands in `Item` and enqueues `valuate` flows all the way to
+Discord on its own.
+
 ## Local development (no Docker for the API)
 
 ```bash
@@ -267,6 +390,7 @@ Useful scripts (repo root):
 | `npm run build -w @flipsight/web` | Production Next.js build (standalone output) |
 | `npm run dev -w @flipsight/web` | Web UI dev server on :3000              |
 | `npm test`          | Unit tests (rule matching, economics, fees/shipping, scoring, comp stats) |
+| `npm run test:api`  | API integration suite (needs postgres+redis up; or `make test-integration`) |
 | `npm run db:migrate`| Create/apply migrations against `DATABASE_URL`      |
 | `npm run db:seed`   | Sources + demo user + default alert rule + app settings (idempotent) |
 | `npm run seed:deal` | Insert a pre-valued demo deal and publish it on `deals:new` |
@@ -446,8 +570,13 @@ packages/worker-core/ Worker chassis: BullMQ app, robots guard, polite HTTP
 packages/clients/     Marketplace/AI clients shared by workers and the API:
                       eBay, Keepa, comps engine, product identifier, listing
                       assistant
-docker/               worker.Dockerfile (shared by all six workers)
-scripts/              smoke.mjs (acceptance), listen.mjs (live deal watcher)
+apps/watchdog/        Health pinger → Discord outage/recovery alerts
+docker/               worker.Dockerfile (shared by all workers + watchdog)
+scripts/              smoke.mjs (acceptance), listen.mjs (deal watcher),
+                      backup.sh / restore.sh (pg_dump ops)
+docs/RUNBOOK.md       What to do when the watchdog pings you
+Makefile              deploy / update / status / logs / backup / restore / test
 caddy/Caddyfile       Edge config for the later HTTPS phase
-docker-compose.yml    postgres + redis + api + web + 6 workers (slot for caddy)
+docker-compose.yml    postgres + redis + api + web + 6 workers + watchdog +
+                      nightly backup (slot for caddy)
 ```

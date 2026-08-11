@@ -61,6 +61,7 @@ app.process(QUEUE, async () => {
   const totals = { pages: 0, unchangedPages: 0, found: 0, created: 0, updated: 0, valuateEnqueued: 0 };
 
   for (const search of searches) {
+    if (app.isClosing) break; // SIGTERM: stop between categories, keep partial totals
     const parsed = GoodwillSearchParamsSchema.safeParse(search.params);
     if (!parsed.success) {
       app.log.warn({ searchId: search.id, issues: parsed.error.issues.slice(0, 3) }, "invalid goodwill search params");
@@ -69,6 +70,7 @@ app.process(QUEUE, async () => {
     const { catId, label } = parsed.data;
 
     for (let page = 1; page <= cfg.maxPagesPerCategory; page++) {
+      if (app.isClosing) break; // SIGTERM: finish current page only
       await politeDelay(cfg.jitterMs.min, cfg.jitterMs.max);
       const { items } = await searchCategory(http, { catId, page, pageSize: cfg.pageSize });
       totals.pages += 1;

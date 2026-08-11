@@ -85,6 +85,7 @@ app.process(QUEUE, async () => {
   // 3. Fetch details politely, analyze with the Anthropic API, store as Items.
   let analysesLeft = cfg.ai.enabled && analyzer.isConfigured() ? cfg.ai.maxAnalysesPerSweep : 0;
   for (const lead of fresh) {
+    if (app.isClosing) break; // SIGTERM: stop between leads (AI calls are slow)
     await politeDelay(500, 1500);
     let detail;
     try {

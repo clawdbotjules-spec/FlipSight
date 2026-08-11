@@ -76,6 +76,7 @@ export function makeSavedSearchSweep(app: WorkerApp, client: EbayClient) {
     let queriesRun = 0;
 
     for (const search of searches) {
+      if (app.isClosing) break; // SIGTERM: yield between searches
       const parsed = EbaySearchParamsSchema.safeParse(search.params);
       if (!parsed.success || parsed.data.kind !== "keywords") continue;
       const params = parsed.data;
@@ -99,6 +100,7 @@ export function makeSavedSearchSweep(app: WorkerApp, client: EbayClient) {
       await checkpoints.set(rotationKey, (offset + slice.length) % queries.length);
 
       for (const q of slice) {
+        if (app.isClosing) break; // SIGTERM: finish current query only
         const filters = [
           ...priceFilter(params.minPrice, params.maxPrice),
           ...(params.buyingOption !== "ANY" ? [`buyingOptions:{${params.buyingOption}}`] : []),
