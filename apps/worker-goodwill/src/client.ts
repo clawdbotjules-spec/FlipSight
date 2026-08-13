@@ -27,15 +27,18 @@ interface SearchResponse {
   searchResults?: { items?: GoodwillItem[]; itemCount?: number };
 }
 
-export function goodwillSearchBody(input: { catId: number; page: number; pageSize: number }): string {
+export function goodwillSearchBody(input: { catId?: number | null; page: number; pageSize: number }): string {
+  // catId omitted/null = global catalog (discovery mode); the endpoint returns
+  // every active listing site-wide, sorted ending-soonest (sortColumn 1 asc).
+  const catId = input.catId ?? null;
   return JSON.stringify({
     // The load-bearing category filter (matches the site's own payload model).
-    selectedCategoryIds: String(input.catId),
+    selectedCategoryIds: catId != null ? String(catId) : "",
     selectedGroup: "",
     selectedSellerIds: "",
-    catIds: String(input.catId),
-    categoryId: input.catId,
-    categoryLevel: 1,
+    catIds: catId != null ? String(catId) : "",
+    categoryId: catId ?? 0,
+    categoryLevel: catId != null ? 1 : 0,
     categoryLevelNo: "1",
     partNumber: "",
     catFullName: "",
@@ -69,7 +72,7 @@ export function goodwillSearchBody(input: { catId: number; page: number; pageSiz
 
 export async function searchCategory(
   http: HttpClient,
-  input: { catId: number; page: number; pageSize: number },
+  input: { catId?: number | null; page: number; pageSize: number },
 ): Promise<{ items: GoodwillItem[]; itemCount: number }> {
   const result = await http.request(SEARCH_URL, {
     method: "POST",

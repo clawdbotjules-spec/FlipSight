@@ -186,6 +186,24 @@ matches each deal against the **enabled alert rules of every connected user**
 records `AlertEvent` rows, and flips deals `new → alerted`. Heavy work never
 runs in request handlers.
 
+### Keyless discovery (no lists to curate)
+
+ShopGoodwill runs in **discovery mode by default**: every sweep scans the
+whole live catalog (~646k listings) sorted ending-soonest, so mispriced
+auctions get valued while there's still time to bid — no keyword lists or
+category subscriptions to maintain. One sweep ingests a few hundred items
+across ~150 categories; the valuation engine decides what's profitable. Turn
+it off (`discover.enabled = false` in the ShopGoodwill config) to fall back to
+targeted category SavedSearches instead.
+
+**Discovery finds candidates; a comp source turns them into deals.** The
+engine will not invent resale prices — an item only becomes a Deal once it has
+real sold comps (eBay Marketplace Insights) or Amazon history (Keepa). With no
+comp keys, discovered items are logged as `valuate_no_data` and wait. So the
+keyless firehose is real, but to see deals you still want **an eBay or Keepa
+key** (see "Getting the API keys"). `npm run seed:item` exercises the full
+pipeline meanwhile.
+
 ### Politeness & legality
 
 Only official APIs and public endpoints are used. Every scraper-style worker

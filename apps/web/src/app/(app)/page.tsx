@@ -213,8 +213,8 @@ export default function FeedPage() {
 
       {query.isSuccess && deals.length === 0 && (
         <EmptyState
-          title="No deals match the current filters"
-          hint="Workers publish here in real time — try `npm run seed:item` or loosen the filters."
+          title="No deals yet"
+          hint="Discovery is scanning listings live (see System), but items only become deals once the engine has resale comps — add an eBay or Keepa key so it can price them. Try `npm run seed:item` to watch the full pipeline fire now."
         />
       )}
 

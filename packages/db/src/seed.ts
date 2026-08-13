@@ -45,6 +45,10 @@ const SOURCE_DEFS: Record<
       requestsPerSec: 0.4,
       sweepEverySec: 300,
       maxPagesPerCategory: 2,
+      // Keyless discovery on by default: scan the whole catalog ending-soonest,
+      // no keyword lists to curate. Set enabled:false to use the category
+      // SavedSearches below instead.
+      discover: { enabled: true, maxPagesPerSweep: 10 },
     },
   },
   walmart_clearance: {

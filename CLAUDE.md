@@ -87,6 +87,13 @@ docker compose up --build  # postgres + redis + api + web + 6 workers
 - ShopGoodwill's search API silently ignores unknown body fields — the
   category filter is `selectedCategoryIds` (see `worker-goodwill/src/client.ts`);
   don't "simplify" the request body without re-verifying category scoping.
+  An **empty** `selectedCategoryIds` returns the global catalog (~646k items,
+  ending-soonest with `sortColumn:1` asc) — that's what powers **discovery
+  mode** (`GoodwillSourceConfig.discover`, on by default): keyless global
+  sweep instead of the category SavedSearches. Discovery only ingests
+  candidates; without a comp source (eBay/Keepa) the valuator returns
+  `valuate_no_data` and they never become Deals — that's intended, the engine
+  never fabricates resale prices.
 - ESM everywhere (`"type": "module"`, TS `module: NodeNext`) — relative
   imports need explicit `.js` extensions.
 - Workspace deps (`@flipsight/shared`, `@flipsight/db`) resolve to `dist/`,

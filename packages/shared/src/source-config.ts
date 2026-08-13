@@ -122,6 +122,19 @@ export const GoodwillSourceConfigSchema = z.object({
   pageSize: z.number().int().min(10).max(100).default(40),
   maxPagesPerCategory: z.number().int().min(1).max(10).default(2),
   minPrice: z.number().min(0).default(5),
+  /**
+   * Keyless discovery: when enabled (the default), each sweep scans the global
+   * ShopGoodwill catalog sorted ending-soonest instead of the DB-driven
+   * category SavedSearches — no keyword lists to curate. The valuation engine
+   * decides what's profitable. Turn off to use targeted category subscriptions.
+   */
+  discover: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Pages of the ending-soonest global catalog to scan each sweep. */
+      maxPagesPerSweep: z.number().int().min(1).max(40).default(10),
+    })
+    .prefault({}),
   /** Extra randomized delay between requests, on top of the token bucket. */
   jitterMs: z.object({ min: z.number().default(400), max: z.number().default(1400) }).prefault({}),
   /**

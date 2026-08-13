@@ -114,6 +114,9 @@ function SourceCard({ source, searches }: { source: SourceInfo; searches: SavedS
   const [expanded, setExpanded] = useState(false);
   const [configText, setConfigText] = useState(() => JSON.stringify(source.config, null, 2));
   const [configError, setConfigError] = useState<string | null>(null);
+  // Keyless discovery = scanning the whole catalog, so the keyword/category
+  // lists below are inactive; surface that instead of a misleading count.
+  const discovering = Boolean((source.config?.discover as { enabled?: boolean } | undefined)?.enabled);
 
   const patch = useMutation({
     mutationFn: (body: { enabled?: boolean; config?: Record<string, unknown> }) =>
@@ -142,9 +145,20 @@ function SourceCard({ source, searches }: { source: SourceInfo; searches: SavedS
         <div className="flex items-center gap-2.5">
           <SourceBadge sourceKey={source.key} />
           <div>
-            <p className="text-[13px] font-medium">{source.name}</p>
+            <p className="flex items-center gap-1.5 text-[13px] font-medium">
+              {source.name}
+              {discovering && (
+                <span
+                  className="rounded-full border border-acc/40 bg-acc/10 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-acc uppercase"
+                  title="Scanning the whole catalog automatically — no keyword lists needed"
+                >
+                  discovery
+                </span>
+              )}
+            </p>
             <p className="num text-[10px] text-faint">
-              {source.itemsLast24h} items/24h · {source.itemsTotal} total · {source.savedSearches} searches
+              {source.itemsLast24h} items/24h · {source.itemsTotal} total ·{" "}
+              {discovering ? "no lists needed" : `${source.savedSearches} searches`}
             </p>
           </div>
         </div>
